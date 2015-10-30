@@ -7,6 +7,7 @@ import (
 	"sync"
 	"os"
 	"bytes"
+	"time"
         coreunix "github.com/ipfs/go-ipfs/core/coreunix"
 	pin "github.com/ipfs/go-ipfs/pin"
 	core "github.com/ipfs/go-ipfs/core"
@@ -323,7 +324,7 @@ func main() {
 
 	index := makeIndex()
 
-	var server,client bool
+	var server,client,ping bool
 	var serverhash,add string
 	var dumphash string
 	flag.BoolVar(&server, "s", false, "Run as server")
@@ -336,6 +337,7 @@ func main() {
 
 	server = hasCmd("server")
 	client = hasCmd("client")
+	ping = hasCmd("ping")
 	if hasCmd("add") {
 		add = getCmdArg("add")
 	}
@@ -410,6 +412,35 @@ func main() {
 			}
 
 			fmt.Println(string(bytes))
+		} else if ping {
+
+			if len(n.Peerstore.Addrs(target)) == 0 {
+				fmt.Println("Looking up peer", target.Pretty())
+				ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+				defer cancel()
+				p, err := n.Routing.FindPeer(ctx, target)
+				if err != nil {
+					fmt.Println("Failed to find peer: ", err)
+					return
+				}
+				n.Peerstore.AddAddrs(p.ID, p.Addrs, peer.TempAddrTTL)
+			}
+
+
+			pings, err := n.Ping.Ping(ctx, target)
+			if err != nil {
+				fmt.Println("Failed to dial: ", err)
+				return
+			}
+			//fmt.Println(pings)
+			_,suc := <- pings
+			if !suc {
+				fmt.Println("Ping failed.")
+				return
+			}
+
+			fmt.Println("Ping success.")
+
 		} else {
 
 
