@@ -306,6 +306,17 @@ func main() {
 		panic(err)
 	}
 
+	//fmt.Println(n.Peerstore)
+	//ids := n.Peerstore.Peers()
+	//for i := range ids {
+	//	//fmt.Println(n.Peerstore.Peers[i])
+	//	fmt.Println(ids[i])
+	//}
+
+
+	//fmt.Println("Waiting for 30 secs")
+	//time.Sleep(30*time.Second)
+
 	//fmt.Println(n)
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -379,6 +390,8 @@ func main() {
 						break
 					}
 				}
+			} else {
+				foundhash = true
 			}
 
 			if !foundhash {
@@ -400,9 +413,18 @@ func main() {
 		} else {
 
 
-			entrylist := getEntryList(n,target)
+			//entrylist := getEntryList(n,target)
+			//for k := 0; k < 15; k++ {
+			//	if len(entrylist.Entries) == 0 {
+			//		fmt.Println("Trying again.")
+					entrylist := getEntryList(n,target)
+			//	} else {
+			//		break
+			//	}
+			//}
+
 			for i := range entrylist.Entries {
-				fmt.Println(entrylist.Entries[i].Name)
+				fmt.Println(entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
 			}
 
 			/*
