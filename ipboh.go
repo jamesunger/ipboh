@@ -106,9 +106,10 @@ func runAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGr
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("I am ready to add: %s\n", n.Identity)
+	//fmt.Printf("I am ready to add: %s\n", n.Identity)
 
 	for {
+		fmt.Println("Waiting for add...\n")
 		con, err := list.Accept()
 		if err != nil {
 			fmt.Println(err)
@@ -390,11 +391,6 @@ func main() {
 
 
 		if add != "" {
-			con, err := corenet.Dial(n, target, "/pack/add")
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
 
 			newcontent := getNewContent(add)
 			contentbytes,err := json.Marshal(newcontent)
@@ -402,11 +398,22 @@ func main() {
 				fmt.Println(err)
 				return
 			}
-			_,err = con.Write(contentbytes)
+
+			con, err := corenet.Dial(n, target, "/pack/add")
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			defer con.Close()
+
+
+			countbytes,err := con.Write(contentbytes)
 			if err != nil {
 				panic(err)
 			}
-			con.Close()
+			if verbose {
+				fmt.Println("Wrote", countbytes, "bytes")
+			}
 			//time.Sleep(15*time.Second)
 		} else if dumphash != "" {
 			// FIXME: validate this in case there is a 46 len name!
