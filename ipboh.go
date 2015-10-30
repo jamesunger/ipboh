@@ -120,18 +120,20 @@ func runAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGr
 		readbytes,err := ioutil.ReadAll(con)
 		// should not die here
 		if err != nil {
-			panic(err)
+			fmt.Println("Failed to ready all bytes: ", err)
+			return
 		}
 
 		newadd := &Add{}
 		err = json.Unmarshal(readbytes,newadd)
 		// should not die here
 		if err != nil {
-			panic(err)
+			fmt.Println("Failed to unmarshal json: ", err)
+			return
 		}
 
 
-		fmt.Println("They wanted to add:", newadd.Name)
+		fmt.Println("They are adding:", newadd.Name)
 
 
 		/*
@@ -324,10 +326,11 @@ func main() {
 
 	index := makeIndex()
 
-	var server,client,ping bool
+	var server,client,ping,verbose bool
 	var serverhash,add string
 	var dumphash string
 	flag.BoolVar(&server, "s", false, "Run as server")
+	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.BoolVar(&client, "c", false, "Run as client")
 	flag.StringVar(&dumphash, "d", "", "Dump contents of hash")
 	flag.StringVar(&add, "a", "", "Add content")
@@ -347,6 +350,12 @@ func main() {
 	}
 
 
+	if !n.OnlineMode() {
+		fmt.Println("Not online...\n")
+               return
+        }
+
+
 
 	if server {
 		go runIndex(n,ctx,index,&wg)
@@ -359,6 +368,26 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+
+
+
+		if len(n.Peerstore.Addrs(target)) == 0 {
+			if verbose {
+				fmt.Println("Looking for peer: ", target.Pretty())
+			}
+			ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+			defer cancel()
+			p, err := n.Routing.FindPeer(ctx, target)
+			if err != nil {
+				fmt.Println("Failed to find peer: ", err)
+				return
+			}
+			if verbose {
+				fmt.Println("Found peer: ", p.Addrs)
+			}
+			n.Peerstore.AddAddrs(p.ID, p.Addrs, peer.TempAddrTTL)
+		}
+
 
 		if add != "" {
 			con, err := corenet.Dial(n, target, "/pack/add")
@@ -414,17 +443,6 @@ func main() {
 			fmt.Println(string(bytes))
 		} else if ping {
 
-			if len(n.Peerstore.Addrs(target)) == 0 {
-				fmt.Println("Looking up peer", target.Pretty())
-				ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-				defer cancel()
-				p, err := n.Routing.FindPeer(ctx, target)
-				if err != nil {
-					fmt.Println("Failed to find peer: ", err)
-					return
-				}
-				n.Peerstore.AddAddrs(p.ID, p.Addrs, peer.TempAddrTTL)
-			}
 
 
 			pings, err := n.Ping.Ping(ctx, target)
