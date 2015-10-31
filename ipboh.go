@@ -411,10 +411,15 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
+
 			if verbose {
 				fmt.Println("Wrote", countbytes, "bytes")
 			}
-			//time.Sleep(15*time.Second)
+
+			//<- ctx.Done()
+			//fmt.Println("All set.")
+
+			time.Sleep(1*time.Second)
 		} else if dumphash != "" {
 			// FIXME: validate this in case there is a 46 len name!
 			foundhash := false
