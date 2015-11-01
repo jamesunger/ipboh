@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	core "github.com/ipfs/go-ipfs/core"
@@ -37,6 +36,11 @@ import (
 	"code.google.com/p/go.net/context"
 	dagutils "github.com/ipfs/go-ipfs/merkledag/utils"
 )
+
+type IpbohConfig struct {
+	Serverhash string
+	Recipient string
+}
 
 type Index struct {
 	Entries []*Entry
@@ -245,7 +249,7 @@ func findKey(keyring openpgp.EntityList, name string) *openpgp.Entity {
 	return nil
 }
 
-func decryptOpenpgp(data []byte, recipient string) ([]byte, error) {
+func decryptOpenpgp(data []byte) ([]byte, error) {
 	home := os.Getenv("HOME")
 	privkeyfile, err := os.Open(fmt.Sprintf("%s/.gnupg/secring.gpg", home))
 	if err != nil {
@@ -272,27 +276,35 @@ func decryptOpenpgp(data []byte, recipient string) ([]byte, error) {
 	}
 	fmt.Fprintln(os.Stderr, "")
 
-	privkey := findKey(privring, recipient)
-	if privkey == nil {
-		return nil, errors.New("Associated private key not found.")
-	}
-
-	if privkey.PrivateKey != nil && privkey.PrivateKey.Encrypted {
-		//fmt.Println("Decrypting private key using passphrase")
-		err := privkey.PrivateKey.Decrypt([]byte(passphrase))
-		if err != nil {
-			fmt.Println("Failed to decrypt key")
+	for _, entity := range privring {
+		//for _, ident := range entity.Identities {
+		if entity.PrivateKey != nil && entity.PrivateKey.Encrypted {
+			//fmt.Println("Decrypting private key using passphrase")
+			entity.PrivateKey.Decrypt([]byte(passphrase))
+			//if err != nil  && verbose {
+			//	fmt.Println("Failed to decrypt key")
+			//}
 		}
-	}
 
-	for _, subkey := range privkey.Subkeys {
-		if subkey.PrivateKey != nil && subkey.PrivateKey.Encrypted {
-			err := subkey.PrivateKey.Decrypt([]byte(passphrase))
-			if err != nil {
-				fmt.Println("Failed to decrypt subkey")
+		for _, subkey := range entity.Subkeys {
+			if subkey.PrivateKey != nil && subkey.PrivateKey.Encrypted {
+				subkey.PrivateKey.Decrypt([]byte(passphrase))
+				//if err != nil && verbose {
+				//	fmt.Println("Failed to decrypt subkey")
+				//}
 			}
 		}
+			//if strings.Contains(ident.Name, name) {
+			//	return entity
+			//}
+		//}
 	}
+
+	//privkey := findKey(privring, recipient)
+	//if privkey == nil {
+	//	return nil, errors.New("Associated private key not found.")
+	//}
+
 
 	md, err := openpgp.ReadMessage(block.Body, privring, nil, nil)
 	if err != nil {
@@ -375,6 +387,88 @@ func getCmdArg(cmdname string) string {
 
 }
 
+func readIpbohConfig(filepath string) *IpbohConfig {
+
+	ipbohconfig := &IpbohConfig{}
+
+	fh,err := os.Open(filepath)
+	defer fh.Close()
+	if err != nil {
+		return ipbohconfig
+	}
+
+	rawb,err := ioutil.ReadAll(fh)
+	if err != nil {
+		return ipbohconfig
+	}
+	err = json.Unmarshal(rawb,ipbohconfig)
+	if err != nil {
+		fmt.Println("Failed to unmarshall:",err)
+		return ipbohconfig
+	}
+
+	return ipbohconfig
+
+}
+
+func saveIpohConfig(ipbohconfig *IpbohConfig, filepath string) error {
+	//fmt.Println("Saving",ipbohconfig,"to",filepath)
+	rawb,err := json.Marshal(ipbohconfig)
+	if err != nil {
+		fmt.Println("Failed to marshal:",err)
+		return err
+	}
+
+	fh,err := os.OpenFile(filepath,os.O_RDWR,0600)
+	if err != nil {
+		fh,err = os.Create(filepath)
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+	}
+	defer fh.Close()
+
+	_,err = fh.Write(rawb)
+	if err != nil {
+		panic(err)
+	}
+
+	return nil
+}
+
+func getUpdateConfig(conft string, item string) string {
+
+
+	filepath := fmt.Sprintf("%s/.ipbohrc",os.Getenv("HOME"))
+	ipbohconfig := readIpbohConfig(filepath)
+
+	if item == "" && conft == "Recipient" {
+		return ipbohconfig.Recipient
+	}
+
+	if item == "" && conft == "Serverhash" {
+		return ipbohconfig.Serverhash
+	}
+
+	if conft == "Recipient" && ipbohconfig.Recipient != item {
+		//fmt.Println("Saving recipient.")
+		ipbohconfig.Recipient = item
+		saveIpohConfig(ipbohconfig,filepath)
+		return item
+	}
+
+	if conft == "Serverhash" && ipbohconfig.Serverhash != item {
+		//fmt.Println("Saving serverhash:",item)
+		ipbohconfig.Serverhash = item
+		saveIpohConfig(ipbohconfig,filepath)
+		return item
+	}
+
+	return item
+
+}
+
 func main() {
 	// Basic ipfsnode setup
 	//r,_ := fsrepo.Open("~/.ipfs")
@@ -414,11 +508,21 @@ func main() {
 		catarg = getCmdArg("cat")
 	}
 
+	// if one argument was specified and it isn't a command then lets be lazy and assume they meant cat
+	// not a good idea? too ambiguous?
+	//if len(os.Args) == 2 && (os.Args[1] != "cat" && os.Args[1] != "server" && os.Args[1] != "ping" && os.Args[1] != "add") {
+	//	catarg = os.Args[1]
+	//}
+
 	// pretty sure this is unnecessary?
 	if !n.OnlineMode() {
 		fmt.Println("Not on online mode...\n")
 		return
 	}
+
+	serverhash = getUpdateConfig("Serverhash",serverhash)
+	//recipient = getUpdateConfig("Recipient",recipient)
+
 
 	if server {
 		go runIndex(n, ctx, index, &wg)
@@ -492,7 +596,7 @@ func main() {
 
 		// cat something
 		} else if catarg != "" {
-			hash := ""
+			hash := catarg
 			// FIXME: validate this in case there is a 46 len name!
 			foundhash := false
 			if len(catarg) != 46 {
@@ -524,9 +628,18 @@ func main() {
 				panic(err)
 			}
 
-			if recipient != "" {
+
+			ispgp := false
+			if len(bytes) >= 40 {
+				initialbytes := bytes[0:40]
+				if strings.Contains(string(initialbytes), "BEGIN PGP MESSAGE") {
+					ispgp = true
+				}
+			}
+
+			if ispgp {
 				//fmt.Println("orig", string(bytes))
-				bytes, err = decryptOpenpgp(bytes, recipient)
+				bytes, err = decryptOpenpgp(bytes)
 				if err != nil {
 					fmt.Println("Failed to decrypt:", err)
 					return
