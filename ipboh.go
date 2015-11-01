@@ -25,7 +25,8 @@ import (
 	//"github.com/ipfs/go-ipfs/blocks"
 	dag "github.com/ipfs/go-ipfs/merkledag"
 
-	ds "github.com/ipfs/go-ipfs/Godeps/_workspace/src/github.com/jbenet/go-datastore"
+	//ds "github.com/ipfs/go-ipfs/Godeps/_workspace/src/github.com/jbenet/go-datastore"
+	"github.com/ipfs/go-ipfs/Godeps/_workspace/src/github.com/jbenet/go-datastore/flatfs"
 	syncds "github.com/ipfs/go-ipfs/Godeps/_workspace/src/github.com/jbenet/go-datastore/sync"
 	bstore "github.com/ipfs/go-ipfs/blocks/blockstore"
 	bserv "github.com/ipfs/go-ipfs/blockservice"
@@ -90,7 +91,12 @@ func runIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.Wait
 
 func NewMemoryDagService() dag.DAGService {
 	// build mem-datastore for editor's intermediary nodes
-	bs := bstore.NewBlockstore(syncds.MutexWrap(ds.NewMapDatastore()))
+	datastore,err := flatfs.New("/tmp/ipboh-datastore",5)
+	if err != nil {
+		panic(err)
+	}
+	//bs := bstore.NewBlockstore(syncds.MutexWrap(ds.NewMapDatastore()))
+	bs := bstore.NewBlockstore(syncds.MutexWrap(datastore))
 	bsrv := bserv.New(bs, offline.Exchange(bs))
 	return dag.NewDAGService(bsrv)
 }
@@ -187,6 +193,11 @@ func runAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGr
 		fmt.Println("Added:", key.B58String())
 		entry := Entry{Name: newadd.Name, Hash: key.B58String()}
 		index.Entries = append(index.Entries, &entry)
+
+		err = saveIndex(index)
+		if err != nil {
+			panic(err)
+		}
 
 		rootnd := e.GetNode()
 
@@ -352,6 +363,52 @@ func encryptOpenpgp(data []byte, recipient string) ([]byte, error) {
 
 }
 
+
+func saveIndex(index *Index) error {
+
+	fh,err := os.OpenFile("/tmp/ipboh-index.txt",os.O_RDWR,0600)
+	if err != nil {
+		fh,err = os.Create("/tmp/ipboh-index.txt")
+		if err != nil {
+			return err
+		}
+	}
+
+	rawb,err := json.Marshal(index)
+	if err != nil {
+		return err
+	}
+
+	fh.Write(rawb)
+	fh.Close()
+
+	return nil
+}
+
+func loadIndex() *Index {
+	index := makeIndex()
+
+	fh,err := os.Open("/tmp/ipboh-index.txt")
+	if err != nil {
+		return index
+	}
+
+	rawb, err := ioutil.ReadAll(fh)
+	if err != nil {
+		fmt.Println("Failed to read index:",err)
+		return index
+	}
+
+	err = json.Unmarshal(rawb,index)
+	if err != nil {
+		fmt.Println("Failed to load index:",err)
+		return index
+	}
+
+	return index
+
+}
+
 func makeIndex() *Index {
 	entries := make([]*Entry, 0)
 	return &Index{Entries: entries}
@@ -494,7 +551,7 @@ func main() {
 	var serverhash, add string
 	var catarg, recipient string
 	flag.BoolVar(&verbose, "v", false, "Verbose")
-	flag.StringVar(&recipient, "r", "", "Encrypt or decrypt to PGP recipient")
+	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
 	flag.Parse()
 
@@ -525,6 +582,9 @@ func main() {
 
 
 	if server {
+
+		index = loadIndex()
+
 		go runIndex(n, ctx, index, &wg)
 		go runAdd(n, ctx, index, &wg)
 		wg.Wait()
@@ -646,7 +706,8 @@ func main() {
 				}
 			}
 
-			fmt.Println(string(bytes))
+			//fmt.Println(string(bytes))
+			os.Stdout.Write(bytes)
 
 		// ping remote server
 		} else if ping {
