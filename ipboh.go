@@ -4,10 +4,15 @@ import (
 	"fmt"
 	"flag"
 	"io/ioutil"
+	"io"
 	"sync"
 	"os"
 	"bytes"
 	"time"
+	"strings"
+	"golang.org/x/crypto/openpgp"
+	"golang.org/x/crypto/openpgp/armor"
+	"golang.org/x/crypto/ssh/terminal"
         coreunix "github.com/ipfs/go-ipfs/core/coreunix"
 	pin "github.com/ipfs/go-ipfs/pin"
 	core "github.com/ipfs/go-ipfs/core"
@@ -122,15 +127,14 @@ func runAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGr
 		// should not die here
 		if err != nil {
 			fmt.Println("Failed to ready all bytes: ", err)
-			return
+			continue
 		}
 
 		newadd := &Add{}
 		err = json.Unmarshal(readbytes,newadd)
-		// should not die here
 		if err != nil {
 			fmt.Println("Failed to unmarshal json: ", err)
-			return
+			continue
 		}
 
 
@@ -252,6 +256,106 @@ func getEntryList(n *core.IpfsNode, target peer.ID) *Index {
 
 }
 
+func findKey(keyring openpgp.EntityList, name string) *openpgp.Entity {
+  for _, entity := range keyring {
+    for _, ident := range entity.Identities {
+      if strings.Contains(ident.Name, name) {
+        return entity
+      }
+    }
+  }
+
+  return nil
+}
+
+func decryptOpenpgp(data []byte, recipient string) ([]byte, error) {
+	privkeyfile,err := os.Open("/home/junger/.gnupg/secring.gpg")
+	if err != nil {
+		fmt.Println("Failed to open secring", err)
+		return nil, err
+	}
+
+	privring, err := openpgp.ReadKeyRing(privkeyfile)
+	if err != nil {
+		fmt.Println("Failed to open secring", err)
+		return nil, err
+	}
+
+
+	reader := bytes.NewReader(data)
+	block, err := armor.Decode(reader)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Password: ")
+	passphrase, err := terminal.ReadPassword(0)
+	if err != nil {
+		panic(err)
+	}
+
+	privkey := findKey(privring, recipient)
+		if privkey.PrivateKey != nil && privkey.PrivateKey.Encrypted {
+			//fmt.Println("Decrypting private key using passphrase")
+			err := privkey.PrivateKey.Decrypt([]byte(passphrase))
+			if err != nil {
+				fmt.Println("Failed to decrypt key")
+			}
+		}
+
+	for _, subkey := range privkey.Subkeys {
+		if subkey.PrivateKey != nil && subkey.PrivateKey.Encrypted {
+			err := subkey.PrivateKey.Decrypt([]byte(passphrase))
+			if err != nil {
+				fmt.Println("Failed to decrypt subkey")
+			}
+		}
+	}
+
+	md,err := openpgp.ReadMessage(block.Body, privring, nil, nil)
+	if err != nil {
+		return nil,err
+	}
+
+	plaintext,err := ioutil.ReadAll(md.UnverifiedBody)
+	if err != nil {
+		panic(err)
+	}
+	return plaintext,nil
+}
+
+func encryptOpenpgp(data []byte, recipient string) ([]byte, error) {
+	pubkeyfile,err := os.Open("/home/junger/.gnupg/pubring.gpg")
+	if err != nil {
+		fmt.Println("Failed to open pubring", err)
+		return nil, err
+	}
+
+	pubring, err := openpgp.ReadKeyRing(pubkeyfile)
+	if err != nil {
+		fmt.Println("Failed to open pubring", err)
+		return nil, err
+	}
+
+	pubkey := findKey(pubring, recipient)
+
+	buf := bytes.NewBuffer(nil)
+	w, _ := armor.Encode(buf, "PGP MESSAGE", nil)
+	plaintext, err := openpgp.Encrypt(w, []*openpgp.Entity{pubkey}, nil, nil, nil)
+	if err != nil {
+		return nil,err
+	}
+	reader := bytes.NewReader(data)
+	_,err = io.Copy(plaintext,reader)
+	plaintext.Close()
+	w.Close()
+	if err != nil {
+		return nil,err
+	}
+
+	return buf.Bytes(),nil
+
+}
 
 
 
@@ -273,7 +377,6 @@ func getNewContent(name string) Add {
 
 
 }
-			//newcontent := &Add{Name: "somenewcontent", Content: []byte("Some bogus content3\n")}
 
 func hasCmd(cmdname string) bool {
 	for i := range os.Args {
@@ -329,11 +432,12 @@ func main() {
 
 	var server,client,ping,verbose bool
 	var serverhash,add string
-	var dumphash string
+	var dumphash,recipient string
 	flag.BoolVar(&server, "s", false, "Run as server")
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.BoolVar(&client, "c", false, "Run as client")
 	flag.StringVar(&dumphash, "d", "", "Dump contents of hash")
+	flag.StringVar(&recipient, "r", "", "PGP recipient")
 	flag.StringVar(&add, "a", "", "Add content")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
 	flag.Parse()
@@ -393,10 +497,18 @@ func main() {
 		if add != "" {
 
 			newcontent := getNewContent(add)
-			contentbytes,err := json.Marshal(newcontent)
 			if err != nil {
 				fmt.Println(err)
 				return
+			}
+
+
+			if recipient != "" {
+				encbytes,err := encryptOpenpgp(newcontent.Content,recipient)
+				if err != nil {
+					fmt.Println("Failed to encrypt.")
+				}
+				newcontent.Content = encbytes
 			}
 
 			con, err := corenet.Dial(n, target, "/pack/add")
@@ -407,6 +519,7 @@ func main() {
 			defer con.Close()
 
 
+			contentbytes,err := json.Marshal(newcontent)
 			countbytes,err := con.Write(contentbytes)
 			if err != nil {
 				panic(err)
@@ -414,12 +527,13 @@ func main() {
 
 			if verbose {
 				fmt.Println("Wrote", countbytes, "bytes")
+				//fmt.Println(string(contentbytes))
 			}
 
 			//<- ctx.Done()
 			//fmt.Println("All set.")
 
-			time.Sleep(1*time.Second)
+			time.Sleep(5*time.Second)
 		} else if dumphash != "" {
 			// FIXME: validate this in case there is a 46 len name!
 			foundhash := false
@@ -450,6 +564,15 @@ func main() {
 			bytes,err := ioutil.ReadAll(reader)
 			if err != nil {
 				panic(err)
+			}
+
+			if recipient != "" {
+				//fmt.Println("orig", string(bytes))
+				bytes,err = decryptOpenpgp(bytes, recipient)
+				if err != nil {
+					fmt.Println("Failed to decrypt:",err)
+					return
+				}
 			}
 
 			fmt.Println(string(bytes))
