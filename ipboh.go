@@ -57,7 +57,7 @@ type Add struct {
 	Content []byte
 }
 
-func runIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup) {
+func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup) {
 	list, err := corenet.Listen(n, "/pack/index")
 	if err != nil {
 		panic(err)
@@ -89,9 +89,9 @@ func runIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.Wait
 
 }
 
-func NewMemoryDagService() dag.DAGService {
+func NewMemoryDagService(dspath string) dag.DAGService {
 	// build mem-datastore for editor's intermediary nodes
-	datastore,err := flatfs.New("/tmp/ipboh-datastore",5)
+	datastore,err := flatfs.New(dspath,2)
 	if err != nil {
 		panic(err)
 	}
@@ -111,7 +111,7 @@ func newDirNode() *dag.Node {
 	}*/
 }
 
-func runAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup) {
+func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup, dspath string) {
 	list, err := corenet.Listen(n, "/pack/add")
 	if err != nil {
 		panic(err)
@@ -162,7 +162,7 @@ func runAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGr
 		//       }
 
 		newdirnode := newDirNode()
-		e := dagutils.NewDagEditor(NewMemoryDagService(), newdirnode)
+		e := dagutils.NewDagEditor(NewMemoryDagService(dspath), newdirnode)
 
 		reader := bytes.NewReader(newadd.Content)
 		chnk, err := chunk.FromString(reader, "rabin")
@@ -194,7 +194,7 @@ func runAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGr
 		entry := Entry{Name: newadd.Name, Hash: key.B58String()}
 		index.Entries = append(index.Entries, &entry)
 
-		err = saveIndex(index)
+		err = saveIndex(index,dspath)
 		if err != nil {
 			panic(err)
 		}
@@ -364,11 +364,11 @@ func encryptOpenpgp(data []byte, recipient string) ([]byte, error) {
 }
 
 
-func saveIndex(index *Index) error {
+func saveIndex(index *Index, dspath string) error {
 
-	fh,err := os.OpenFile("/tmp/ipboh-index.txt",os.O_RDWR,0600)
+	fh,err := os.OpenFile(dspath + "/ipboh-index.txt",os.O_RDWR,0600)
 	if err != nil {
-		fh,err = os.Create("/tmp/ipboh-index.txt")
+		fh,err = os.Create(dspath + "/ipboh-index.txt")
 		if err != nil {
 			return err
 		}
@@ -385,10 +385,10 @@ func saveIndex(index *Index) error {
 	return nil
 }
 
-func loadIndex() *Index {
+func loadIndex(dspath string) *Index {
 	index := makeIndex()
 
-	fh,err := os.Open("/tmp/ipboh-index.txt")
+	fh,err := os.Open(dspath + "/ipboh-index.txt")
 	if err != nil {
 		return index
 	}
@@ -548,10 +548,11 @@ func main() {
 	index := makeIndex()
 
 	var server, ping, verbose bool
-	var serverhash, add string
+	var serverhash, add,dspath string
 	var catarg, recipient string
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
+	flag.StringVar(&dspath, "d", "/tmp/ipboh-data", "Data store path, by default /tmp/ipboh-data")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
 	flag.Parse()
 
@@ -583,10 +584,15 @@ func main() {
 
 	if server {
 
-		index = loadIndex()
+		err := os.Mkdir(dspath,0700)
+		if err != nil {
+			fmt.Println("Could not make dspath:",dspath)
+		}
 
-		go runIndex(n, ctx, index, &wg)
-		go runAdd(n, ctx, index, &wg)
+		index = loadIndex(dspath)
+
+		go handleIndex(n, ctx, index, &wg)
+		go handleAdd(n, ctx, index, &wg, dspath)
 		wg.Wait()
 	} else if serverhash == "" {
 		fmt.Println("Need to specify a remote server node id e.g. -h QmarTZGZDhBpDY5wgx9qSJrFcNokF37iD44Vk2FTYGPyBs")
