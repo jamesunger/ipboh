@@ -94,6 +94,7 @@ func NewMemoryDagService() dag.DAGService {
 }
 
 
+
 //var rootnode *dag.Node
 func newDirNode() *dag.Node {
 	return &dag.Node{Data: ft.FolderPBData()}
@@ -293,6 +294,7 @@ func decryptOpenpgp(data []byte, recipient string) ([]byte, error) {
 	if err != nil {
 		panic(err)
 	}
+	fmt.Fprintln(os.Stderr, "")
 
 	privkey := findKey(privring, recipient)
 		if privkey.PrivateKey != nil && privkey.PrivateKey.Encrypted {
