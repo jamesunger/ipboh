@@ -36,6 +36,7 @@ import (
 
 	"code.google.com/p/go.net/context"
 	dagutils "github.com/ipfs/go-ipfs/merkledag/utils"
+	config "github.com/ipfs/go-ipfs/repo/config"
 )
 
 type IpbohConfig struct {
@@ -527,11 +528,27 @@ func getUpdateConfig(conft string, item string) string {
 }
 
 func main() {
+
+
 	// Basic ipfsnode setup
 	//r,_ := fsrepo.Open("~/.ipfs")
 	r, err := fsrepo.Open("~/.ipfs")
 	if err != nil {
-		panic(err)
+		config,err := config.Init(os.Stdout, 2048)
+		if err != nil {
+			panic(err)
+		}
+
+		home := os.Getenv("HOME")
+		if err := fsrepo.Init(home + "/.ipfs", config); err != nil {
+			panic(err)
+		}
+
+
+		r, err = fsrepo.Open("~/.ipfs")
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -546,6 +563,8 @@ func main() {
 	wg.Add(2)
 
 	index := makeIndex()
+
+
 
 	var server, ping, verbose bool
 	var serverhash, add,dspath string
