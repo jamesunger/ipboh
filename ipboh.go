@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -527,37 +528,80 @@ func getUpdateConfig(conft string, item string) string {
 
 }
 
+func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID) {
+	http.HandleFunc("/add", func(w http.ResponseWriter, r *http.Request) {
+		con, err := corenet.Dial(n, target, "/pack/add")
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		defer con.Close()
+
+		_,err = io.Copy(con,r.Body)
+		if err != nil {
+			http.Error(w,fmt.Sprintf("Error adding file:", err), 500)
+			return
+		}
+
+	})
+
+	http.HandleFunc("/ls", func(w http.ResponseWriter, r *http.Request) {
+		entrylist := getEntryList(n, target)
+		elbytes,err := json.Marshal(entrylist)
+		//fmt.Println("ls request sending ", string(elbytes))
+		if err != nil {
+			http.Error(w,fmt.Sprintf("Error marshaling json:", err), 500)
+			return
+		}
+		w.Write(elbytes)
+	})
+
+	http.HandleFunc("/cat", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		hash := r.Form["hash"][0]
+		// FIXME: validate this in case there is a 46 len name!
+		foundhash := false
+		if len(hash) != 46 {
+			entrylist := getEntryList(n, target)
+			//fmt.Println(entrylist)
+			for i := range entrylist.Entries {
+				if entrylist.Entries[i].Name == hash {
+					hash = entrylist.Entries[i].Hash
+					foundhash = true
+					break
+				}
+			}
+		} else {
+			foundhash = true
+		}
+
+		if !foundhash {
+			http.Error(w,"No entry found.",500)
+			return
+		}
+
+		reader, err := coreunix.Cat(ctx, n, hash)
+		if err != nil {
+			panic(err)
+		}
+
+		_,err = io.Copy(w, reader)
+		if err != nil {
+			http.Error(w,fmt.Sprintf("Error reading or writing entry:", err),500)
+			return
+		}
+
+	})
+
+	httpd := &http.Server{
+                Addr:           fmt.Sprintf("%s:%d","127.0.0.1",9898),
+        }
+	httpd.ListenAndServe()
+}
+
 func main() {
 
 
-	// Basic ipfsnode setup
-	//r,_ := fsrepo.Open("~/.ipfs")
-	r, err := fsrepo.Open("~/.ipfs")
-	if err != nil {
-		config,err := config.Init(os.Stdout, 2048)
-		if err != nil {
-			panic(err)
-		}
-
-		home := os.Getenv("HOME")
-		if err := fsrepo.Init(home + "/.ipfs", config); err != nil {
-			panic(err)
-		}
-
-
-		r, err = fsrepo.Open("~/.ipfs")
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	n, err := core.NewNode(ctx, &core.BuildCfg{Online: true, Repo: r})
-	if err != nil {
-		panic(err)
-	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)
@@ -566,13 +610,14 @@ func main() {
 
 
 
-	var server, ping, verbose bool
+	var server, ping, verbose, clientserver bool
 	var serverhash, add,dspath string
 	var catarg, recipient string
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
 	flag.StringVar(&dspath, "d", "/tmp/ipboh-data", "Data store path, by default /tmp/ipboh-data")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
+	flag.BoolVar(&clientserver, "c", false, "Start client server")
 	flag.Parse()
 
 	server = hasCmd("server")
@@ -592,13 +637,48 @@ func main() {
 	//}
 
 	// pretty sure this is unnecessary?
-	if !n.OnlineMode() {
-		fmt.Println("Not on online mode...\n")
-		return
-	}
+	//if !n.OnlineMode() {
+	//	fmt.Println("Not on online mode...\n")
+	//	return
+	//}
 
 	serverhash = getUpdateConfig("Serverhash",serverhash)
 	//recipient = getUpdateConfig("Recipient",recipient)
+
+	var ctx context.Context
+	var n *core.IpfsNode
+	if server || clientserver {
+		// Basic ipfsnode setup
+		//r,_ := fsrepo.Open("~/.ipfs")
+		r, err := fsrepo.Open("~/.ipfs")
+		if err != nil {
+			config,err := config.Init(os.Stdout, 2048)
+			if err != nil {
+				panic(err)
+			}
+	
+			home := os.Getenv("HOME")
+			if err := fsrepo.Init(home + "/.ipfs", config); err != nil {
+				panic(err)
+			}
+	
+	
+			r, err = fsrepo.Open("~/.ipfs")
+			if err != nil {
+				panic(err)
+			}
+		}
+	
+		contx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ctx = contx
+	
+		node, err := core.NewNode(ctx, &core.BuildCfg{Online: true, Repo: r})
+		if err != nil {
+			panic(err)
+		}
+		n = node
+	}
 
 
 	if server {
@@ -625,21 +705,28 @@ func main() {
 			panic(err)
 		}
 
-		if len(n.Peerstore.Addrs(target)) == 0 {
-			if verbose {
-				fmt.Println("Looking for peer: ", target.Pretty())
+		if clientserver {
+
+
+			if len(n.Peerstore.Addrs(target)) == 0 {
+				if verbose {
+					fmt.Println("Looking for peer: ", target.Pretty())
+				}
+				ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+				defer cancel()
+				p, err := n.Routing.FindPeer(ctx, target)
+				if err != nil {
+					fmt.Println("Failed to find peer: ", err)
+					return
+				}
+				if verbose {
+					fmt.Println("Found peer: ", p.Addrs)
+				}
+				n.Peerstore.AddAddrs(p.ID, p.Addrs, peer.TempAddrTTL)
 			}
-			ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
-			defer cancel()
-			p, err := n.Routing.FindPeer(ctx, target)
-			if err != nil {
-				fmt.Println("Failed to find peer: ", err)
-				return
-			}
-			if verbose {
-				fmt.Println("Found peer: ", p.Addrs)
-			}
-			n.Peerstore.AddAddrs(p.ID, p.Addrs, peer.TempAddrTTL)
+
+			wg.Add(1)
+			startClientServer(ctx,n,target)
 		}
 
 
@@ -647,10 +734,10 @@ func main() {
 		if add != "" {
 
 			newcontent := getNewContent(add)
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
+			//if err != nil {
+			//	fmt.Println(err)
+			//	return
+			//}
 
 			if recipient != "" {
 				encbytes, err := encryptOpenpgp(newcontent.Content, recipient)
@@ -660,55 +747,26 @@ func main() {
 				newcontent.Content = encbytes
 			}
 
-			con, err := corenet.Dial(n, target, "/pack/add")
-			if err != nil {
-				fmt.Println(err)
-				return
-			}
-			defer con.Close()
-
 			contentbytes, err := json.Marshal(newcontent)
-			countbytes, err := con.Write(contentbytes)
+
+			buf := bytes.NewBuffer(contentbytes)
+			resp,err := http.Post("http://localhost:9898/add", "application/json", buf)
+
 			if err != nil {
 				panic(err)
 			}
+			defer resp.Body.Close()
 
-			if verbose {
-				fmt.Println("Wrote", countbytes, "bytes")
-			}
-
-			time.Sleep(1 * time.Second)
 
 		// cat something
 		} else if catarg != "" {
-			hash := catarg
-			// FIXME: validate this in case there is a 46 len name!
-			foundhash := false
-			if len(catarg) != 46 {
-				entrylist := getEntryList(n, target)
-				//fmt.Println(entrylist)
-				for i := range entrylist.Entries {
-					if entrylist.Entries[i].Name == catarg {
-						hash = entrylist.Entries[i].Hash
-						foundhash = true
-						break
-					}
-				}
-			} else {
-				foundhash = true
-			}
 
-			if !foundhash {
-				fmt.Println("No entry found.")
-				return
-			}
-
-			reader, err := coreunix.Cat(ctx, n, hash)
+			resp,err := http.Get(fmt.Sprintf("http://localhost:9898/cat?hash=%s", catarg))
 			if err != nil {
 				panic(err)
 			}
 
-			bytes, err := ioutil.ReadAll(reader)
+			bytes, err := ioutil.ReadAll(resp.Body)
 			if err != nil {
 				panic(err)
 			}
@@ -731,7 +789,6 @@ func main() {
 				}
 			}
 
-			//fmt.Println(string(bytes))
 			os.Stdout.Write(bytes)
 
 		// ping remote server
@@ -755,7 +812,23 @@ func main() {
 		// fetch entry list by default
 		} else {
 
-			entrylist := getEntryList(n, target)
+			resp,err := http.Get("http://localhost:9898/ls")
+			if err != nil {
+				panic(err)
+			}
+
+
+			entrylist := &Index{}
+			rawbytes,err := ioutil.ReadAll(resp.Body)
+			//fmt.Println("got raw bytes", string(rawbytes))
+			if err != nil {
+				fmt.Println("Error reading response from localhost\n")
+				panic(err)
+			}
+			err = json.Unmarshal(rawbytes,entrylist)
+			if err != nil {
+				fmt.Println("Failed to unmarshal:", err)
+			}
 
 			for i := range entrylist.Entries {
 				fmt.Println(entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
