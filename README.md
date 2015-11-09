@@ -2,14 +2,14 @@
 IPFS Bag of Holding
 ===================
 
-This is a POC to play around with IPFS. It runs a server on one host which clients can directly query using the IPFS swarm dial features. Files are then fetched via the IPFS network. There is nothing here that IPFS doesn't do with the ipfs command, but ipboh simplifies the interface and functionlity and supports OpenPGP.
+This is a POC to play around with IPFS. It runs a server on one host which clients can directly query using the IPFS swarm dial features. Files are then fetched via the IPFS network. There is nothing here that IPFS doesn't do with the ipfs command, but ipboh simplifies the interface and functionality and supports OpenPGP.
 
 To run the server, somewhere:
 ```
  ipboh server
 ```
 
-Data by default with be persisted in /tmp/ipboh-data and can be overridden with the -d flag. Hosting behind a NAT is currently problematic from what I've noticed.
+If run for the first time, it will print out the IPFS ID which is needed by the client. Data by default with be persisted in /tmp/ipboh-data and can be overridden with the -d flag. Hosting behind a NAT is currently problematic from what I've noticed.
 
 Then ipboh may be used as a client on another host to list entries:
 ```
