@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"syscall"
+	"errors"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -599,6 +601,38 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID) {
 	httpd.ListenAndServe()
 }
 
+// ripped from https://github.com/VividCortex/godaemon/blob/master/os.go
+func Readlink(name string) (string, error) {
+for len := 128; ; len *= 2 {
+b := make([]byte, len)
+n, e := syscall.Readlink(name, b)
+if e != nil {
+return "", &os.PathError{"readlink", name, e}
+}
+if n < len {
+if z := bytes.IndexByte(b[:n], 0); z >= 0 {
+n = z
+}
+return string(b[:n]), nil
+}
+}
+}
+
+func waitForClientserver(count int) error {
+	for i := 0; i<=count; i++ {
+		resp,err := http.Get("http://localhost:9898/")
+		if err != nil {
+			time.Sleep(1*time.Second)
+			continue
+		}
+
+		if resp.StatusCode == 404 {
+			return nil
+		}
+	}
+	return errors.New("Waited too long for clientserver")
+}
+
 func main() {
 
 
@@ -610,7 +644,7 @@ func main() {
 
 
 
-	var server, ping, verbose, clientserver bool
+	var server, ping, verbose, clientserver, spawnClientserver bool
 	var serverhash, add,dspath string
 	var catarg, recipient string
 	flag.BoolVar(&verbose, "v", false, "Verbose")
@@ -647,37 +681,77 @@ func main() {
 
 	var ctx context.Context
 	var n *core.IpfsNode
+	//if server || clientserver {
+	// Basic ipfsnode setup
+	//r,_ := fsrepo.Open("~/.ipfs")
+	//if os.Args[0] == "-c" {
+	//	fmt.Println("WTF do not spawn.")
+	//	spawnClientserver = false
+	//	clientserver = true
+	//}
 	if server || clientserver {
-		// Basic ipfsnode setup
-		//r,_ := fsrepo.Open("~/.ipfs")
 		r, err := fsrepo.Open("~/.ipfs")
+		//if err != nil && strings.Contains(fmt.Sprintf("%s",err),"temporar") 
 		if err != nil {
 			config,err := config.Init(os.Stdout, 2048)
 			if err != nil {
 				panic(err)
 			}
-	
+
 			home := os.Getenv("HOME")
 			if err := fsrepo.Init(home + "/.ipfs", config); err != nil {
 				panic(err)
 			}
-	
-	
+
+
 			r, err = fsrepo.Open("~/.ipfs")
 			if err != nil {
-				panic(err)
+			panic(err)
 			}
 		}
-	
-		contx, cancel := context.WithCancel(context.Background())
+
+
+		cotx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		ctx = contx
-	
+		ctx = cotx
+
 		node, err := core.NewNode(ctx, &core.BuildCfg{Online: true, Repo: r})
 		if err != nil {
 			panic(err)
 		}
 		n = node
+	} else {
+		resp,err := http.Get("http://localhost:9898/")
+		if err != nil {
+			//fmt.Println("Need to spawn..", clientserver,os.Args);
+			spawnClientserver = true
+		} else if resp.StatusCode == 404 {
+			//fmt.Println("No need to spawn..");
+			spawnClientserver = false
+		} else {
+			//fmt.Println("Need to spawn..", resp);
+			spawnClientserver = true
+		}
+
+	}
+
+
+	if spawnClientserver {
+		exePath, err := Readlink("/proc/self/exe")
+		if err != nil {
+			err = fmt.Errorf("failed to get pid: %v", err)
+		}
+
+		//cmd := exec.Cmd{Path: exePath, Args: os.Args}
+		files := make([]*os.File, 3, 3)
+		files[0], files[1], files[2] = os.Stdin, os.Stdout, os.Stderr
+		attrs := os.ProcAttr{Dir: ".", Env: os.Environ(), Files: files}
+		_,err = os.StartProcess(exePath, []string{ exePath, "-c" }, &attrs)
+		if err != nil {
+			panic(err)
+		}
+		//fmt.Println(proc)
+		//fmt.Println("Started", exePath)
 	}
 
 
@@ -697,37 +771,48 @@ func main() {
 		fmt.Println("Need to specify a remote server node id e.g. -h QmarTZGZDhBpDY5wgx9qSJrFcNokF37iD44Vk2FTYGPyBs")
 		return
 
-	// client instance
+
+	// start client server
+	} else if clientserver {
+		target, err := peer.IDB58Decode(serverhash)
+		if err != nil {
+			panic(err)
+		}
+
+		if len(n.Peerstore.Addrs(target)) == 0 {
+			if verbose {
+				fmt.Println("Looking for peer: ", target.Pretty())
+			}
+			ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
+			defer cancel()
+			p, err := n.Routing.FindPeer(ctx, target)
+			if err != nil {
+				fmt.Println("Failed to find peer: ", err)
+				return
+			}
+			if verbose {
+				fmt.Println("Found peer: ", p.Addrs)
+			}
+			n.Peerstore.AddAddrs(p.ID, p.Addrs, peer.TempAddrTTL)
+		}
+
+		wg.Add(1)
+		startClientServer(ctx,n,target)
+	// run client command
 	} else {
+		if spawnClientserver {
+			//fmt.Println("Sleeping for 10 seconds...\n")
+			err := waitForClientserver(20)
+			if err != nil {
+				panic(err)
+			}
+		}
 
 		target, err := peer.IDB58Decode(serverhash)
 		if err != nil {
 			panic(err)
 		}
 
-		if clientserver {
-
-
-			if len(n.Peerstore.Addrs(target)) == 0 {
-				if verbose {
-					fmt.Println("Looking for peer: ", target.Pretty())
-				}
-				ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
-				defer cancel()
-				p, err := n.Routing.FindPeer(ctx, target)
-				if err != nil {
-					fmt.Println("Failed to find peer: ", err)
-					return
-				}
-				if verbose {
-					fmt.Println("Found peer: ", p.Addrs)
-				}
-				n.Peerstore.AddAddrs(p.ID, p.Addrs, peer.TempAddrTTL)
-			}
-
-			wg.Add(1)
-			startClientServer(ctx,n,target)
-		}
 
 
 		// add something
