@@ -2,12 +2,9 @@
 IPFS Bag of Holding
 ===================
 
-This is a POC to play around with IPFS. It runs a server in memory on one node and clients connect to list file entries and download them.
+This is a POC to play around with IPFS. It runs a server in memory on one node and clients connect to list file entries and download them. There is nothing here that IPFS doesn't do (better), but this allows convenient (read: download, run) access to arbitrary files and integrates OpenPGP encryption.
 
 I wanted to learn IPFS and have always wanted a simple tool that works anywhere to efficiently save/store arbitrary files with PGP support.
-
-The goal of this project is a convenient (read: download, use) tool that gives trivial shell integrated access to arbitrary files on arbitrary boxes.
-
 
 To run the server, somewhere:
 ```
@@ -27,13 +24,22 @@ Nothing will list on a new node.
 
 The '-h' option is only necessary once. Once -h has been set ipboh saves it in: ~/.ipbohrc.
 
-To add an entry:
+To add some entries:
+```
+ echo "some content" | ipboh add testcontent1
+ cat /tmp/largerfile.data | ipboh add largerfile.data
+```
 
- echo "some content" | ipboh add ENTRYNAME
+Listing entries again:
+```
+$ ipboh
+Qmb1EXrDyKhNWfvLPYK4do3M9nU7BuLAcbqBir6aUrDsRY testcontent1
+QmWuXZhpYEXkB1j7N45SigyjSgQf5GrY1mgBFwEu4ChjTB largerfile.data
 ```
 
 and to get an entry:
 ```
- ipboh cat ENTRYNAME
+$ ipboh cat testcontent1
+some content
 ```
 
