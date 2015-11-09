@@ -2,9 +2,7 @@
 IPFS Bag of Holding
 ===================
 
-This is a POC to play around with IPFS. It runs a server in memory on one node and clients connect to list file entries and download them. There is nothing here that IPFS doesn't do (better), but this allows convenient (read: download, run) access to arbitrary files and integrates OpenPGP encryption.
-
-I wanted to learn IPFS and have always wanted a simple tool that works anywhere to efficiently save/store arbitrary files with PGP support.
+This is a POC to play around with IPFS. It runs a server on one host which clients can directly query using the IPFS swarm dial features. Files are then fetched via the IPFS network. There is nothing here that IPFS doesn't do with the ipfs command, but ipboh simplifies the interface and functionlity and supports OpenPGP.
 
 To run the server, somewhere:
 ```
@@ -18,7 +16,7 @@ Then ipboh may be used as a client on another host to list entries:
  ipboh -h HASHOFSERVERNODE
 ```
 
-*Please note* that ipboh will spawn a separate process into the background to field requests over a local HTTP server. Earlier versions did everything in one process which really isn't a good idea for IPFS since it is a persistent P2P network.
+*Please note* that ipboh will spawn a separate process into the background to field client requests over a local HTTP server. Earlier versions did everything in one process which really isn't very efficient for IPFS since it is a persistent P2P network.
 
 Nothing will list on a new node.
 
