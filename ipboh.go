@@ -3,11 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
-	"net/http"
-	"syscall"
-	"errors"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -21,9 +19,11 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	//"github.com/ipfs/go-ipfs/blocks"
 	dag "github.com/ipfs/go-ipfs/merkledag"
@@ -44,7 +44,7 @@ import (
 
 type IpbohConfig struct {
 	Serverhash string
-	Recipient string
+	Recipient  string
 }
 
 type Index struct {
@@ -95,7 +95,7 @@ func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.W
 
 func NewMemoryDagService(dspath string) dag.DAGService {
 	// build mem-datastore for editor's intermediary nodes
-	datastore,err := flatfs.New(dspath,2)
+	datastore, err := flatfs.New(dspath, 2)
 	if err != nil {
 		panic(err)
 	}
@@ -198,7 +198,7 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.Wai
 		entry := Entry{Name: newadd.Name, Hash: key.B58String()}
 		index.Entries = append(index.Entries, &entry)
 
-		err = saveIndex(index,dspath)
+		err = saveIndex(index, dspath)
 		if err != nil {
 			panic(err)
 		}
@@ -309,9 +309,9 @@ func decryptOpenpgp(data []byte) ([]byte, error) {
 				//}
 			}
 		}
-			//if strings.Contains(ident.Name, name) {
-			//	return entity
-			//}
+		//if strings.Contains(ident.Name, name) {
+		//	return entity
+		//}
 		//}
 	}
 
@@ -319,7 +319,6 @@ func decryptOpenpgp(data []byte) ([]byte, error) {
 	//if privkey == nil {
 	//	return nil, errors.New("Associated private key not found.")
 	//}
-
 
 	md, err := openpgp.ReadMessage(block.Body, privring, nil, nil)
 	if err != nil {
@@ -367,18 +366,17 @@ func encryptOpenpgp(data []byte, recipient string) ([]byte, error) {
 
 }
 
-
 func saveIndex(index *Index, dspath string) error {
 
-	fh,err := os.OpenFile(dspath + "/ipboh-index.txt",os.O_RDWR,0600)
+	fh, err := os.OpenFile(dspath+"/ipboh-index.txt", os.O_RDWR, 0600)
 	if err != nil {
-		fh,err = os.Create(dspath + "/ipboh-index.txt")
+		fh, err = os.Create(dspath + "/ipboh-index.txt")
 		if err != nil {
 			return err
 		}
 	}
 
-	rawb,err := json.Marshal(index)
+	rawb, err := json.Marshal(index)
 	if err != nil {
 		return err
 	}
@@ -392,20 +390,20 @@ func saveIndex(index *Index, dspath string) error {
 func loadIndex(dspath string) *Index {
 	index := makeIndex()
 
-	fh,err := os.Open(dspath + "/ipboh-index.txt")
+	fh, err := os.Open(dspath + "/ipboh-index.txt")
 	if err != nil {
 		return index
 	}
 
 	rawb, err := ioutil.ReadAll(fh)
 	if err != nil {
-		fmt.Println("Failed to read index:",err)
+		fmt.Println("Failed to read index:", err)
 		return index
 	}
 
-	err = json.Unmarshal(rawb,index)
+	err = json.Unmarshal(rawb, index)
 	if err != nil {
-		fmt.Println("Failed to load index:",err)
+		fmt.Println("Failed to load index:", err)
 		return index
 	}
 
@@ -452,19 +450,19 @@ func readIpbohConfig(filepath string) *IpbohConfig {
 
 	ipbohconfig := &IpbohConfig{}
 
-	fh,err := os.Open(filepath)
+	fh, err := os.Open(filepath)
 	defer fh.Close()
 	if err != nil {
 		return ipbohconfig
 	}
 
-	rawb,err := ioutil.ReadAll(fh)
+	rawb, err := ioutil.ReadAll(fh)
 	if err != nil {
 		return ipbohconfig
 	}
-	err = json.Unmarshal(rawb,ipbohconfig)
+	err = json.Unmarshal(rawb, ipbohconfig)
 	if err != nil {
-		fmt.Println("Failed to unmarshall:",err)
+		fmt.Println("Failed to unmarshall:", err)
 		return ipbohconfig
 	}
 
@@ -474,15 +472,15 @@ func readIpbohConfig(filepath string) *IpbohConfig {
 
 func saveIpohConfig(ipbohconfig *IpbohConfig, filepath string) error {
 	//fmt.Println("Saving",ipbohconfig,"to",filepath)
-	rawb,err := json.Marshal(ipbohconfig)
+	rawb, err := json.Marshal(ipbohconfig)
 	if err != nil {
-		fmt.Println("Failed to marshal:",err)
+		fmt.Println("Failed to marshal:", err)
 		return err
 	}
 
-	fh,err := os.OpenFile(filepath,os.O_RDWR,0600)
+	fh, err := os.OpenFile(filepath, os.O_RDWR, 0600)
 	if err != nil {
-		fh,err = os.Create(filepath)
+		fh, err = os.Create(filepath)
 		if err != nil {
 			fmt.Println(err)
 			return err
@@ -490,7 +488,7 @@ func saveIpohConfig(ipbohconfig *IpbohConfig, filepath string) error {
 	}
 	defer fh.Close()
 
-	_,err = fh.Write(rawb)
+	_, err = fh.Write(rawb)
 	if err != nil {
 		panic(err)
 	}
@@ -500,8 +498,7 @@ func saveIpohConfig(ipbohconfig *IpbohConfig, filepath string) error {
 
 func getUpdateConfig(conft string, item string) string {
 
-
-	filepath := fmt.Sprintf("%s/.ipbohrc",os.Getenv("HOME"))
+	filepath := fmt.Sprintf("%s/.ipbohrc", os.Getenv("HOME"))
 	ipbohconfig := readIpbohConfig(filepath)
 
 	if item == "" && conft == "Recipient" {
@@ -515,14 +512,14 @@ func getUpdateConfig(conft string, item string) string {
 	if conft == "Recipient" && ipbohconfig.Recipient != item {
 		//fmt.Println("Saving recipient.")
 		ipbohconfig.Recipient = item
-		saveIpohConfig(ipbohconfig,filepath)
+		saveIpohConfig(ipbohconfig, filepath)
 		return item
 	}
 
 	if conft == "Serverhash" && ipbohconfig.Serverhash != item {
 		//fmt.Println("Saving serverhash:",item)
 		ipbohconfig.Serverhash = item
-		saveIpohConfig(ipbohconfig,filepath)
+		saveIpohConfig(ipbohconfig, filepath)
 		return item
 	}
 
@@ -539,9 +536,9 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID, po
 		}
 		defer con.Close()
 
-		_,err = io.Copy(con,r.Body)
+		_, err = io.Copy(con, r.Body)
 		if err != nil {
-			http.Error(w,fmt.Sprintf("Error adding file:", err), 500)
+			http.Error(w, fmt.Sprintf("Error adding file:", err), 500)
 			return
 		}
 
@@ -549,10 +546,10 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID, po
 
 	http.HandleFunc("/ls", func(w http.ResponseWriter, r *http.Request) {
 		entrylist := getEntryList(n, target)
-		elbytes,err := json.Marshal(entrylist)
+		elbytes, err := json.Marshal(entrylist)
 		//fmt.Println("ls request sending ", string(elbytes))
 		if err != nil {
-			http.Error(w,fmt.Sprintf("Error marshaling json:", err), 500)
+			http.Error(w, fmt.Sprintf("Error marshaling json:", err), 500)
 			return
 		}
 		w.Write(elbytes)
@@ -578,7 +575,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID, po
 		}
 
 		if !foundhash {
-			http.Error(w,"No entry found.",500)
+			http.Error(w, "No entry found.", 500)
 			return
 		}
 
@@ -587,42 +584,42 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID, po
 			panic(err)
 		}
 
-		_,err = io.Copy(w, reader)
+		_, err = io.Copy(w, reader)
 		if err != nil {
-			http.Error(w,fmt.Sprintf("Error reading or writing entry:", err),500)
+			http.Error(w, fmt.Sprintf("Error reading or writing entry:", err), 500)
 			return
 		}
 
 	})
 
 	httpd := &http.Server{
-                Addr:           fmt.Sprintf("%s:%d","127.0.0.1",port),
-        }
+		Addr: fmt.Sprintf("%s:%d", "127.0.0.1", port),
+	}
 	httpd.ListenAndServe()
 }
 
 // ripped from https://github.com/VividCortex/godaemon/blob/master/os.go
 func Readlink(name string) (string, error) {
-for len := 128; ; len *= 2 {
-b := make([]byte, len)
-n, e := syscall.Readlink(name, b)
-if e != nil {
-return "", &os.PathError{"readlink", name, e}
-}
-if n < len {
-if z := bytes.IndexByte(b[:n], 0); z >= 0 {
-n = z
-}
-return string(b[:n]), nil
-}
-}
+	for len := 128; ; len *= 2 {
+		b := make([]byte, len)
+		n, e := syscall.Readlink(name, b)
+		if e != nil {
+			return "", &os.PathError{"readlink", name, e}
+		}
+		if n < len {
+			if z := bytes.IndexByte(b[:n], 0); z >= 0 {
+				n = z
+			}
+			return string(b[:n]), nil
+		}
+	}
 }
 
 func waitForClientserver(count int) error {
-	for i := 0; i<=count; i++ {
-		resp,err := http.Get("http://localhost:9898/")
+	for i := 0; i <= count; i++ {
+		resp, err := http.Get("http://localhost:9898/")
 		if err != nil {
-			time.Sleep(1*time.Second)
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
@@ -635,17 +632,13 @@ func waitForClientserver(count int) error {
 
 func main() {
 
-
-
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	index := makeIndex()
 
-
-
 	var server, verbose, clientserver, spawnClientserver bool
-	var serverhash, add,dspath string
+	var serverhash, add, dspath string
 	var catarg, recipient string
 	var port int
 	flag.BoolVar(&verbose, "v", false, "Verbose")
@@ -665,32 +658,30 @@ func main() {
 		catarg = getCmdArg("cat")
 	}
 
-	serverhash = getUpdateConfig("Serverhash",serverhash)
+	serverhash = getUpdateConfig("Serverhash", serverhash)
 
 	var ctx context.Context
 	var n *core.IpfsNode
 
 	if server || clientserver {
 		r, err := fsrepo.Open("~/.ipfs")
-		//if err != nil && strings.Contains(fmt.Sprintf("%s",err),"temporar") 
+		//if err != nil && strings.Contains(fmt.Sprintf("%s",err),"temporar")
 		if err != nil {
-			config,err := config.Init(os.Stdout, 2048)
+			config, err := config.Init(os.Stdout, 2048)
 			if err != nil {
 				panic(err)
 			}
 
 			home := os.Getenv("HOME")
-			if err := fsrepo.Init(home + "/.ipfs", config); err != nil {
+			if err := fsrepo.Init(home+"/.ipfs", config); err != nil {
 				panic(err)
 			}
 
-
 			r, err = fsrepo.Open("~/.ipfs")
 			if err != nil {
-			panic(err)
+				panic(err)
 			}
 		}
-
 
 		cotx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -702,7 +693,7 @@ func main() {
 		}
 		n = node
 	} else {
-		resp,err := http.Get(fmt.Sprintf("http://localhost:%d/",port))
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
 		if err != nil {
 			//fmt.Println("Need to spawn..", clientserver,os.Args);
 			spawnClientserver = true
@@ -716,7 +707,6 @@ func main() {
 
 	}
 
-
 	if spawnClientserver {
 		exePath, err := Readlink("/proc/self/exe")
 		if err != nil {
@@ -726,20 +716,18 @@ func main() {
 		files := make([]*os.File, 3, 3)
 		files[0], files[1], files[2] = os.Stdin, os.Stdout, os.Stderr
 		attrs := os.ProcAttr{Dir: ".", Env: os.Environ(), Files: files}
-		_,err = os.StartProcess(exePath, []string{ exePath, "-c" }, &attrs)
+		_, err = os.StartProcess(exePath, []string{exePath, "-c"}, &attrs)
 		if err != nil {
 			panic(err)
 		}
 	}
 
-
-
 	// startup the server if that is what we are doing
 	if server {
 
-		err := os.Mkdir(dspath,0700)
+		err := os.Mkdir(dspath, 0700)
 		if err != nil {
-			fmt.Println("Could not make dspath:",dspath)
+			fmt.Println("Could not make dspath:", dspath)
 		}
 
 		index = loadIndex(dspath)
@@ -748,13 +736,12 @@ func main() {
 		go handleAdd(n, ctx, index, &wg, dspath)
 		wg.Wait()
 
-	// make sure we have a serverhash, we'll need it for client or clientserver
+		// make sure we have a serverhash, we'll need it for client or clientserver
 	} else if serverhash == "" {
 		fmt.Println("Need to specify a remote server node id e.g. -h QmarTZGZDhBpDY5wgx9qSJrFcNokF37iD44Vk2FTYGPyBs")
 		return
 
-
-	// start client server
+		// start client server
 	} else if clientserver {
 		target, err := peer.IDB58Decode(serverhash)
 		if err != nil {
@@ -779,9 +766,9 @@ func main() {
 		}
 
 		wg.Add(1)
-		startClientServer(ctx,n,target,port)
+		startClientServer(ctx, n, target, port)
 
-	// run client command
+		// run client command
 	} else {
 		if spawnClientserver {
 			//fmt.Println("Sleeping for 10 seconds...\n")
@@ -807,18 +794,17 @@ func main() {
 			contentbytes, err := json.Marshal(newcontent)
 
 			buf := bytes.NewBuffer(contentbytes)
-			resp,err := http.Post(fmt.Sprintf("http://localhost:%d/add",port), "application/json", buf)
+			resp, err := http.Post(fmt.Sprintf("http://localhost:%d/add", port), "application/json", buf)
 
 			if err != nil {
 				panic(err)
 			}
 			defer resp.Body.Close()
 
-
-		// cat something
+			// cat something
 		} else if catarg != "" {
 
-			resp,err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s", port, catarg))
+			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s", port, catarg))
 			if err != nil {
 				panic(err)
 			}
@@ -827,7 +813,6 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
-
 
 			ispgp := false
 			if len(bytes) >= 40 {
@@ -848,23 +833,22 @@ func main() {
 
 			os.Stdout.Write(bytes)
 
-		// fetch entry list by default
+			// fetch entry list by default
 		} else {
 
-			resp,err := http.Get(fmt.Sprintf("http://localhost:%d/ls",port))
+			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/ls", port))
 			if err != nil {
 				panic(err)
 			}
 
-
 			entrylist := &Index{}
-			rawbytes,err := ioutil.ReadAll(resp.Body)
+			rawbytes, err := ioutil.ReadAll(resp.Body)
 			//fmt.Println("got raw bytes", string(rawbytes))
 			if err != nil {
 				fmt.Println("Error reading response from localhost\n")
 				panic(err)
 			}
-			err = json.Unmarshal(rawbytes,entrylist)
+			err = json.Unmarshal(rawbytes, entrylist)
 			if err != nil {
 				fmt.Println("Failed to unmarshal:", err)
 			}
