@@ -530,7 +530,7 @@ func getUpdateConfig(conft string, item string) string {
 
 }
 
-func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID) {
+func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID, port int) {
 	http.HandleFunc("/add", func(w http.ResponseWriter, r *http.Request) {
 		con, err := corenet.Dial(n, target, "/pack/add")
 		if err != nil {
@@ -596,7 +596,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID) {
 	})
 
 	httpd := &http.Server{
-                Addr:           fmt.Sprintf("%s:%d","127.0.0.1",9898),
+                Addr:           fmt.Sprintf("%s:%d","127.0.0.1",port),
         }
 	httpd.ListenAndServe()
 }
@@ -644,18 +644,19 @@ func main() {
 
 
 
-	var server, ping, verbose, clientserver, spawnClientserver bool
+	var server, verbose, clientserver, spawnClientserver bool
 	var serverhash, add,dspath string
 	var catarg, recipient string
+	var port int
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
 	flag.StringVar(&dspath, "d", "/tmp/ipboh-data", "Data store path, by default /tmp/ipboh-data")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
+	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
 	flag.Parse()
 
 	server = hasCmd("server")
-	ping = hasCmd("ping")
 	if hasCmd("add") {
 		add = getCmdArg("add")
 	}
@@ -664,31 +665,11 @@ func main() {
 		catarg = getCmdArg("cat")
 	}
 
-	// if one argument was specified and it isn't a command then lets be lazy and assume they meant cat
-	// not a good idea? too ambiguous?
-	//if len(os.Args) == 2 && (os.Args[1] != "cat" && os.Args[1] != "server" && os.Args[1] != "ping" && os.Args[1] != "add") {
-	//	catarg = os.Args[1]
-	//}
-
-	// pretty sure this is unnecessary?
-	//if !n.OnlineMode() {
-	//	fmt.Println("Not on online mode...\n")
-	//	return
-	//}
-
 	serverhash = getUpdateConfig("Serverhash",serverhash)
-	//recipient = getUpdateConfig("Recipient",recipient)
 
 	var ctx context.Context
 	var n *core.IpfsNode
-	//if server || clientserver {
-	// Basic ipfsnode setup
-	//r,_ := fsrepo.Open("~/.ipfs")
-	//if os.Args[0] == "-c" {
-	//	fmt.Println("WTF do not spawn.")
-	//	spawnClientserver = false
-	//	clientserver = true
-	//}
+
 	if server || clientserver {
 		r, err := fsrepo.Open("~/.ipfs")
 		//if err != nil && strings.Contains(fmt.Sprintf("%s",err),"temporar") 
@@ -721,7 +702,7 @@ func main() {
 		}
 		n = node
 	} else {
-		resp,err := http.Get("http://localhost:9898/")
+		resp,err := http.Get(fmt.Sprintf("http://localhost:%d/",port))
 		if err != nil {
 			//fmt.Println("Need to spawn..", clientserver,os.Args);
 			spawnClientserver = true
@@ -742,7 +723,6 @@ func main() {
 			err = fmt.Errorf("failed to get pid: %v", err)
 		}
 
-		//cmd := exec.Cmd{Path: exePath, Args: os.Args}
 		files := make([]*os.File, 3, 3)
 		files[0], files[1], files[2] = os.Stdin, os.Stdout, os.Stderr
 		attrs := os.ProcAttr{Dir: ".", Env: os.Environ(), Files: files}
@@ -750,11 +730,11 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		//fmt.Println(proc)
-		//fmt.Println("Started", exePath)
 	}
 
 
+
+	// startup the server if that is what we are doing
 	if server {
 
 		err := os.Mkdir(dspath,0700)
@@ -767,6 +747,8 @@ func main() {
 		go handleIndex(n, ctx, index, &wg)
 		go handleAdd(n, ctx, index, &wg, dspath)
 		wg.Wait()
+
+	// make sure we have a serverhash, we'll need it for client or clientserver
 	} else if serverhash == "" {
 		fmt.Println("Need to specify a remote server node id e.g. -h QmarTZGZDhBpDY5wgx9qSJrFcNokF37iD44Vk2FTYGPyBs")
 		return
@@ -797,7 +779,8 @@ func main() {
 		}
 
 		wg.Add(1)
-		startClientServer(ctx,n,target)
+		startClientServer(ctx,n,target,port)
+
 	// run client command
 	} else {
 		if spawnClientserver {
@@ -808,21 +791,10 @@ func main() {
 			}
 		}
 
-		target, err := peer.IDB58Decode(serverhash)
-		if err != nil {
-			panic(err)
-		}
-
-
-
 		// add something
 		if add != "" {
 
 			newcontent := getNewContent(add)
-			//if err != nil {
-			//	fmt.Println(err)
-			//	return
-			//}
 
 			if recipient != "" {
 				encbytes, err := encryptOpenpgp(newcontent.Content, recipient)
@@ -835,7 +807,7 @@ func main() {
 			contentbytes, err := json.Marshal(newcontent)
 
 			buf := bytes.NewBuffer(contentbytes)
-			resp,err := http.Post("http://localhost:9898/add", "application/json", buf)
+			resp,err := http.Post(fmt.Sprintf("http://localhost:%d/add",port), "application/json", buf)
 
 			if err != nil {
 				panic(err)
@@ -846,7 +818,7 @@ func main() {
 		// cat something
 		} else if catarg != "" {
 
-			resp,err := http.Get(fmt.Sprintf("http://localhost:9898/cat?hash=%s", catarg))
+			resp,err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s", port, catarg))
 			if err != nil {
 				panic(err)
 			}
@@ -876,28 +848,10 @@ func main() {
 
 			os.Stdout.Write(bytes)
 
-		// ping remote server
-		} else if ping {
-
-			pings, err := n.Ping.Ping(ctx, target)
-			if err != nil {
-				fmt.Println("Failed to dial: ", err)
-				return
-			}
-			//fmt.Println(pings)
-			_, suc := <-pings
-			if !suc {
-				fmt.Println("Ping failed.")
-				return
-			}
-
-			fmt.Println("Ping success.")
-
-
 		// fetch entry list by default
 		} else {
 
-			resp,err := http.Get("http://localhost:9898/ls")
+			resp,err := http.Get(fmt.Sprintf("http://localhost:%d/ls",port))
 			if err != nil {
 				panic(err)
 			}
