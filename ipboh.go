@@ -528,7 +528,19 @@ func getUpdateConfig(conft string, item string) string {
 }
 
 func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
+
+
+	//resettime := 60*time.Second
+	resettime := 1800*time.Second
+	timer := time.NewTimer(resettime) // half hour
+	go func() {
+		<-timer.C
+		//fmt.Println("Timer expired")
+		os.Exit(0)
+	}()
+
 	http.HandleFunc("/add", func(w http.ResponseWriter, r *http.Request) {
+		timer.Reset(resettime)
 		r.ParseForm()
 		targethash := r.Form["target"][0]
 		target, err := peer.IDB58Decode(targethash)
@@ -552,6 +564,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 	})
 
 	http.HandleFunc("/ls", func(w http.ResponseWriter, r *http.Request) {
+		timer.Reset(resettime)
 		r.ParseForm()
 		targethash := r.Form["target"][0]
 		target, err := peer.IDB58Decode(targethash)
@@ -570,6 +583,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 	})
 
 	http.HandleFunc("/cat", func(w http.ResponseWriter, r *http.Request) {
+		timer.Reset(resettime)
 		r.ParseForm()
 		hash := r.Form["hash"][0]
 		targethash := r.Form["target"][0]
