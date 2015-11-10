@@ -527,8 +527,15 @@ func getUpdateConfig(conft string, item string) string {
 
 }
 
-func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID, port int) {
+func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 	http.HandleFunc("/add", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		targethash := r.Form["target"][0]
+		target, err := peer.IDB58Decode(targethash)
+		if err != nil {
+			http.Error(w,fmt.Sprintf("%s",err),500)
+		}
+
 		con, err := corenet.Dial(n, target, "/pack/add")
 		if err != nil {
 			fmt.Println(err)
@@ -545,6 +552,13 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID, po
 	})
 
 	http.HandleFunc("/ls", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		targethash := r.Form["target"][0]
+		target, err := peer.IDB58Decode(targethash)
+		if err != nil {
+			http.Error(w,fmt.Sprintf("%s",err),500)
+		}
+
 		entrylist := getEntryList(n, target)
 		elbytes, err := json.Marshal(entrylist)
 		//fmt.Println("ls request sending ", string(elbytes))
@@ -558,6 +572,12 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, target peer.ID, po
 	http.HandleFunc("/cat", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		hash := r.Form["hash"][0]
+		targethash := r.Form["target"][0]
+		target, err := peer.IDB58Decode(targethash)
+		if err != nil {
+			http.Error(w,fmt.Sprintf("%s",err),500)
+		}
+
 		// FIXME: validate this in case there is a 46 len name!
 		foundhash := false
 		if len(hash) != 46 {
@@ -743,12 +763,8 @@ func main() {
 
 		// start client server
 	} else if clientserver {
-		target, err := peer.IDB58Decode(serverhash)
-		if err != nil {
-			panic(err)
-		}
 
-		if len(n.Peerstore.Addrs(target)) == 0 {
+		/*if len(n.Peerstore.Addrs(target)) == 0 {
 			if verbose {
 				fmt.Println("Looking for peer: ", target.Pretty())
 			}
@@ -763,10 +779,10 @@ func main() {
 				fmt.Println("Found peer: ", p.Addrs)
 			}
 			n.Peerstore.AddAddrs(p.ID, p.Addrs, peer.TempAddrTTL)
-		}
+		}*/
 
 		wg.Add(1)
-		startClientServer(ctx, n, target, port)
+		startClientServer(ctx, n, port)
 
 		// run client command
 	} else {
@@ -794,7 +810,7 @@ func main() {
 			contentbytes, err := json.Marshal(newcontent)
 
 			buf := bytes.NewBuffer(contentbytes)
-			resp, err := http.Post(fmt.Sprintf("http://localhost:%d/add", port), "application/json", buf)
+			resp, err := http.Post(fmt.Sprintf("http://localhost:%d/add?target=%s", port, serverhash), "application/json", buf)
 
 			if err != nil {
 				panic(err)
@@ -804,7 +820,7 @@ func main() {
 			// cat something
 		} else if catarg != "" {
 
-			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s", port, catarg))
+			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s&target=%s", port, catarg, serverhash))
 			if err != nil {
 				panic(err)
 			}
@@ -836,7 +852,7 @@ func main() {
 			// fetch entry list by default
 		} else {
 
-			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/ls", port))
+			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/ls?target=%s", port, serverhash))
 			if err != nil {
 				panic(err)
 			}
