@@ -2,8 +2,14 @@
 IPFS Bag of Holding
 ===================
 
-This is a POC to play around with IPFS. It runs a server on one host which clients can directly query using the IPFS swarm dial features. Files are then fetched via the IPFS network. There is nothing here that IPFS doesn't do with the ipfs command, but ipboh simplifies the interface and functionality and supports OpenPGP.
+This is a POC to play around with IPFS. It runs a server on one host which
+clients can directly query using the IPFS swarm dial features. Files are then
+fetched via the IPFS network. There is nothing here that IPFS doesn't do with
+the ipfs command, but ipboh simplifies the interface with a flat list of files,
+is easy to backup/move around on the serverside and supports PGP.
 
+Example
+-------
 To run the server, somewhere:
 ```
  ipboh server
@@ -16,7 +22,7 @@ Then ipboh may be used as a client on another host to list entries:
  ipboh -h HASHOFSERVERNODE
 ```
 
-*Please note* that ipboh will spawn a separate process into the background to field client requests over a local HTTP server. Earlier versions did everything in one process which really isn't very efficient for IPFS since it is a persistent P2P network.
+*Please note* that ipboh will spawn a separate process into the background to field client requests over a local HTTP server. Earlier versions did everything in one process which really isn't very efficient for IPFS since it is a persistent P2P network. The server nukes itself after half an hour with requests. This is so I can feel safe running this randomly on whatever box I find myself on without worry of leaving a daemon behind.
 
 Nothing will list on a new node.
 
@@ -41,3 +47,16 @@ $ ipboh cat testcontent1
 some content
 ```
 
+PGP Support
+-----------
+ipboh will use PGP keys if already present in ~/.gnupg. If you want to encrypt
+something, just specify the PGP key as such: 
+```
+$ echo "encrypted content" | ipboh -e testkey add enccontent
+```
+when fetched, it will attempt to decrypt automatically:
+```
+$ ipboh cat enccontent
+Password: 
+encrypted content
+```
