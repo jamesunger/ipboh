@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"runtime"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -23,7 +24,7 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"syscall"
+	//"syscall"
 	"time"
 	//"github.com/ipfs/go-ipfs/blocks"
 	dag "github.com/ipfs/go-ipfs/merkledag"
@@ -40,6 +41,7 @@ import (
 	"code.google.com/p/go.net/context"
 	dagutils "github.com/ipfs/go-ipfs/merkledag/utils"
 	config "github.com/ipfs/go-ipfs/repo/config"
+	"github.com/VividCortex/godaemon"
 )
 
 type IpbohConfig struct {
@@ -265,8 +267,8 @@ func findKey(keyring openpgp.EntityList, name string) *openpgp.Entity {
 }
 
 func decryptOpenpgp(data []byte) ([]byte, error) {
-	home := os.Getenv("HOME")
-	privkeyfile, err := os.Open(fmt.Sprintf("%s/.gnupg/secring.gpg", home))
+	home := getHomeDir()
+	privkeyfile, err := os.Open(fmt.Sprintf("%s%s.gnupg%ssecring.gpg", home, string(os.PathSeparator), string(os.PathSeparator)))
 	if err != nil {
 		fmt.Println("Failed to open secring", err)
 		return nil, err
@@ -333,8 +335,8 @@ func decryptOpenpgp(data []byte) ([]byte, error) {
 }
 
 func encryptOpenpgp(data []byte, recipient string) ([]byte, error) {
-	home := os.Getenv("HOME")
-	pubkeyfile, err := os.Open(fmt.Sprintf("%s/.gnupg/pubring.gpg", home))
+	home := getHomeDir()
+	pubkeyfile, err := os.Open(fmt.Sprintf("%s%s.gnupg%spubring.gpg", home, string(os.PathSeparator), string(os.PathSeparator)))
 	if err != nil {
 		fmt.Println("Failed to open pubring", err)
 		return nil, err
@@ -496,9 +498,20 @@ func saveIpohConfig(ipbohconfig *IpbohConfig, filepath string) error {
 	return nil
 }
 
+func getHomeDir() string {
+	home := os.Getenv("HOME")
+	if runtime.GOOS == "windows" {
+		home = os.Getenv("USERPROFILE")
+	}
+
+	return home
+}
+
 func getUpdateConfig(conft string, item string) string {
 
-	filepath := fmt.Sprintf("%s/.ipbohrc", os.Getenv("HOME"))
+	home := getHomeDir()
+
+	filepath := fmt.Sprintf("%s%s.ipbohrc", home, string(os.PathSeparator))
 	ipbohconfig := readIpbohConfig(filepath)
 
 	if item == "" && conft == "Recipient" {
@@ -632,23 +645,6 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 	httpd.ListenAndServe()
 }
 
-// ripped from https://github.com/VividCortex/godaemon/blob/master/os.go
-func Readlink(name string) (string, error) {
-	for len := 128; ; len *= 2 {
-		b := make([]byte, len)
-		n, e := syscall.Readlink(name, b)
-		if e != nil {
-			return "", &os.PathError{"readlink", name, e}
-		}
-		if n < len {
-			if z := bytes.IndexByte(b[:n], 0); z >= 0 {
-				n = z
-			}
-			return string(b[:n]), nil
-		}
-	}
-}
-
 func waitForClientserver(count int) error {
 	for i := 0; i <= count; i++ {
 		resp, err := http.Get("http://localhost:9898/")
@@ -698,7 +694,15 @@ func main() {
 	var n *core.IpfsNode
 
 	if server || clientserver {
-		r, err := fsrepo.Open("~/.ipfs")
+		var ipfsrepopath string
+		home := getHomeDir()
+
+		if runtime.GOOS == "windows" {
+			ipfsrepopath = fmt.Sprintf("%s\\ipfsrepo",home)
+		} else {
+			ipfsrepopath = fmt.Sprintf("%s/.ipfs",home)
+		}
+		r, err := fsrepo.Open(ipfsrepopath)
 		//if err != nil && strings.Contains(fmt.Sprintf("%s",err),"temporar")
 		if err != nil {
 			config, err := config.Init(os.Stdout, 2048)
@@ -706,12 +710,12 @@ func main() {
 				panic(err)
 			}
 
-			home := os.Getenv("HOME")
-			if err := fsrepo.Init(home+"/.ipfs", config); err != nil {
+
+			if err := fsrepo.Init(ipfsrepopath, config); err != nil {
 				panic(err)
 			}
 
-			r, err = fsrepo.Open("~/.ipfs")
+			r, err = fsrepo.Open(ipfsrepopath)
 			if err != nil {
 				panic(err)
 			}
@@ -742,7 +746,9 @@ func main() {
 	}
 
 	if spawnClientserver {
-		exePath, err := Readlink("/proc/self/exe")
+		// FIXME to be portable
+		var exePath string
+		exePath,err := godaemon.GetExecutablePath()
 		if err != nil {
 			err = fmt.Errorf("failed to get pid: %v", err)
 		}
