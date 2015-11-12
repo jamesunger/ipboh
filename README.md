@@ -1,14 +1,34 @@
-
 IPFS Bag of Holding
 ===================
 
 This is a POC to play around with IPFS. It runs a server on one host which
 clients can directly query using the IPFS swarm dial features. Files are then
-fetched via the IPFS network. There is nothing here that IPFS doesn't do with
-the ipfs command, but ipboh simplifies the interface with a flat list of files,
-is easy to backup/move around on the serverside and supports PGP.
+fetched via the IPFS network.
 
-Example
+There is nothing here that IPFS doesn't do with the ipfs command, but ipboh
+simplifies the interface with a flat list of files, is easy to backup/copy on
+the serverside and supports PGP.
+
+The goal is to have a convenient tool that I can use to distribute random files
+to random hosts and provides ready integration with the shell.
+
+Installation
+------------
+```
+$ go get github.com/jamesunger/ipboh
+```
+
+If compiling on Windows or cross compiling for Windows, omit fuse and build
+directly after git clone:
+```
+$ export GOOS=windows
+$ go build -tags nofuse ipboh.go
+```
+
+ipboh should work on MacOS and Windows, but I've only tested Windows (and not
+very much).
+
+Example Usage
 -------
 To run the server, somewhere:
 ```
