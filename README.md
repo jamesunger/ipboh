@@ -47,6 +47,20 @@ $ ipboh cat testcontent1
 some content
 ```
 
+If you add content with the same name it will be appended to list but by
+default duplicates will be omitted from the entry list in favor of the most
+recently added entry. This means you can keep adding content with the same name
+and ensure clients will always get the latest. If you want a previous version
+use verbose:
+```
+$ ipboh -v
+```
+to list duplicate entries. To fetch an entry that is not the most recent
+reference the hash instead of the name (or just use ipfs command):
+```
+$ ipboh cat QmdrqwWC74ANFDJqAmEL3BQEbw5apg6Kra1TDL1B25JTPG
+```
+
 PGP Support
 -----------
 ipboh will use PGP keys if already present in ~/.gnupg. If you want to encrypt
