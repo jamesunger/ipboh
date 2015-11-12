@@ -610,7 +610,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 		if len(hash) != 46 {
 			entrylist := getEntryList(n, target)
 			//fmt.Println(entrylist)
-			for i := range entrylist.Entries {
+			for i := len(entrylist.Entries)-1; i >= 0; i-- {
 				if entrylist.Entries[i].Name == hash {
 					hash = entrylist.Entries[i].Hash
 					foundhash = true
@@ -889,8 +889,20 @@ func main() {
 				fmt.Println("Failed to unmarshal:", err)
 			}
 
-			for i := range entrylist.Entries {
-				fmt.Println(entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
+			seen := make(map[string]bool)
+			// reverse the list
+			for i := len(entrylist.Entries)-1; i >= 0; i-- {
+
+				if verbose {
+					fmt.Println(entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
+					continue
+				}
+
+				_, exists := seen[entrylist.Entries[i].Name];
+				if !exists {
+					fmt.Println(entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
+				}
+				seen[entrylist.Entries[i].Name] = true
 			}
 
 		}
