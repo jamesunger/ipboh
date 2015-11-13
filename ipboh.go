@@ -114,13 +114,12 @@ func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.W
 
 }
 
-func NewMemoryDagService(dspath string) dag.DAGService {
-	// build mem-datastore for editor's intermediary nodes
+func NewFlatfsDagService(dspath string) dag.DAGService {
 	datastore, err := flatfs.New(dspath, 2)
 	if err != nil {
 		panic(err)
 	}
-	//bs := bstore.NewBlockstore(syncds.MutexWrap(ds.NewMapDatastore()))
+
 	bs := bstore.NewBlockstore(syncds.MutexWrap(datastore))
 	bsrv := bserv.New(bs, offline.Exchange(bs))
 	return dag.NewDAGService(bsrv)
@@ -187,7 +186,7 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.Wai
 		//       }
 
 		newdirnode := newDirNode()
-		e := dagutils.NewDagEditor(NewMemoryDagService(dspath), newdirnode)
+		e := dagutils.NewDagEditor(NewFlatfsDagService(dspath), newdirnode)
 
 		reader := bytes.NewReader(newadd.Content)
 		chnk, err := chunk.FromString(reader, "rabin")
@@ -285,9 +284,8 @@ func findKey(keyring openpgp.EntityList, name string) *openpgp.Entity {
 	return nil
 }
 
-func decryptOpenpgp(data []byte) ([]byte, error) {
-	home := getHomeDir()
-	privkeyfile, err := os.Open(fmt.Sprintf("%s%s.gnupg%ssecring.gpg", home, string(os.PathSeparator), string(os.PathSeparator)))
+func decryptOpenpgp(data []byte, gpghome string, pass []byte) ([]byte, error) {
+	privkeyfile, err := os.Open(fmt.Sprintf("%s%ssecring.gpg",gpghome, string(os.PathSeparator)))
 	if err != nil {
 		fmt.Println("Failed to open secring", err)
 		return nil, err
@@ -305,18 +303,20 @@ func decryptOpenpgp(data []byte) ([]byte, error) {
 		panic(err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Password: ")
-	passphrase, err := terminal.ReadPassword(0)
-	if err != nil {
-		panic(err)
+	if len(pass) == 0 {
+		fmt.Fprintf(os.Stderr, "Password: ")
+		pass, err = terminal.ReadPassword(0)
+		if err != nil {
+			panic(err)
+		}
 	}
-	fmt.Fprintln(os.Stderr, "")
+	//fmt.Fprintln(os.Stderr, "")
 
 	for _, entity := range privring {
 		//for _, ident := range entity.Identities {
 		if entity.PrivateKey != nil && entity.PrivateKey.Encrypted {
 			//fmt.Println("Decrypting private key using passphrase")
-			entity.PrivateKey.Decrypt([]byte(passphrase))
+			entity.PrivateKey.Decrypt(pass)
 			//if err != nil  && verbose {
 			//	fmt.Println("Failed to decrypt key")
 			//}
@@ -324,7 +324,7 @@ func decryptOpenpgp(data []byte) ([]byte, error) {
 
 		for _, subkey := range entity.Subkeys {
 			if subkey.PrivateKey != nil && subkey.PrivateKey.Encrypted {
-				subkey.PrivateKey.Decrypt([]byte(passphrase))
+				subkey.PrivateKey.Decrypt(pass)
 				//if err != nil && verbose {
 				//	fmt.Println("Failed to decrypt subkey")
 				//}
@@ -353,9 +353,8 @@ func decryptOpenpgp(data []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-func encryptOpenpgp(data []byte, recipient string) ([]byte, error) {
-	home := getHomeDir()
-	pubkeyfile, err := os.Open(fmt.Sprintf("%s%s.gnupg%spubring.gpg", home, string(os.PathSeparator), string(os.PathSeparator)))
+func encryptOpenpgp(data []byte, recipient string, gpghome string) ([]byte, error) {
+	pubkeyfile, err := os.Open(fmt.Sprintf("%s%spubring.gpg", gpghome, string(os.PathSeparator)))
 	if err != nil {
 		fmt.Println("Failed to open pubring", err)
 		return nil, err
@@ -526,6 +525,20 @@ func getHomeDir() string {
 	return home
 }
 
+func getGpghomeDir(home string) string {
+	gpgdir := ""
+	if runtime.GOOS == "windows" {
+		gpgdir = fmt.Sprintf("%s\\gnupg", home)
+	} else {
+		gpgdir = fmt.Sprintf("%s/.gnupg", home)
+	}
+
+	return gpgdir
+}
+
+
+
+
 func getUpdateConfig(conft string, item string) string {
 
 	home := getHomeDir()
@@ -685,14 +698,18 @@ func main() {
 	wg.Add(2)
 
 	index := makeIndex()
+	home := getHomeDir()
+	gpghomeDefault := getGpghomeDir(home)
 
 	var server, verbose, clientserver, spawnClientserver bool
-	var serverhash, add, dspath string
+	var serverhash, add, dspath,gpghome,gpgpass string
 	var catarg, recipient string
 	var port int
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
 	flag.StringVar(&dspath, "d", "/tmp/ipboh-data", "Data store path, by default /tmp/ipboh-data")
+	flag.StringVar(&gpghome, "g", gpghomeDefault, "GPG homedir.")
+	flag.StringVar(&gpgpass, "gpass", "", "GPG password. This is insecure and only used on Windows where reading from the terminal breaks.")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
 	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
@@ -714,7 +731,6 @@ func main() {
 
 	if server || clientserver {
 		var ipfsrepopath string
-		home := getHomeDir()
 
 		if runtime.GOOS == "windows" {
 			ipfsrepopath = fmt.Sprintf("%s\\ipfsrepo",home)
@@ -839,7 +855,7 @@ func main() {
 			newcontent := getNewContent(add)
 
 			if recipient != "" {
-				encbytes, err := encryptOpenpgp(newcontent.Content, recipient)
+				encbytes, err := encryptOpenpgp(newcontent.Content, recipient, gpghome)
 				if err != nil {
 					fmt.Println("Failed to encrypt.")
 				}
@@ -879,7 +895,7 @@ func main() {
 
 			if ispgp {
 				//fmt.Println("orig", string(bytes))
-				bytes, err = decryptOpenpgp(bytes)
+				bytes, err = decryptOpenpgp(bytes,gpghome,[]byte(gpgpass))
 				if err != nil {
 					fmt.Println("Failed to decrypt:", err)
 					return
