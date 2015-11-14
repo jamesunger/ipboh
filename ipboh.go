@@ -152,47 +152,14 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.Wai
 		defer con.Close()
 
 		fmt.Printf("Connection from: %s\n", con.Conn().RemotePeer())
-		/*readbytes, err := ioutil.ReadAll(con)
-		// should not die here
-		if err != nil {
-			fmt.Println("Failed to ready all bytes: ", err)
-			continue
-		}
-
-		newadd := &Add{}
-		err = json.Unmarshal(readbytes, newadd)
-		if err != nil {
-			fmt.Println("Failed to unmarshal json: ", err)
-			continue
-		}
-
-//		reader := bytes.NewReader(newadd.Content)
-		*/
-
-		/*
-			b := blocks.NewBlock(newadd.Content)
-			fmt.Println("Block:", b.Key().B58String())
-
-			blockadd,err := n.Blocks.AddBlock(b)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Println(blockadd)
-		*/
-
-		//dagnode := &dag.Node{Data: newadd.Content}
-		//dagadd, err := n.DAG.Add(dagnode)
-		//if err != nil {
-		//		panic(err)
-		//       }
 
 		newdirnode := newDirNode()
 		e := dagutils.NewDagEditor(NewFlatfsDagService(dspath), newdirnode)
 
-//		reader := bytes.NewReader(newadd.Content)
 
 
-
+		// wrap the connection in the serverContentReader so we can get our
+		// header
 		serverReader := &serverContentReader{ r: con }
 		chnk, err := chunk.FromString(serverReader, "rabin")
 		if err != nil {
@@ -257,16 +224,11 @@ func getEntryList(n *core.IpfsNode, target peer.ID) *Index {
 		return index
 	}
 
-	//	rawbytes := make([]byte, 2048, 2048)
-	//	buf := bytes.NewBuffer(rawbytes)
-	//	_,err = io.Copy(buf, con)
-
 	rawbytes, err := ioutil.ReadAll(con)
 	if err != nil {
 		fmt.Println(err)
 		return index
 	}
-	//fmt.Println("Got result:" + string(rawbytes))
 
 	err = json.Unmarshal(rawbytes, index)
 	if err != nil {
@@ -315,37 +277,20 @@ func decryptOpenpgp(data []byte, gpghome string, pass []byte) ([]byte, error) {
 		if err != nil {
 			panic(err)
 		}
+		fmt.Fprintln(os.Stderr, "")
 	}
-	//fmt.Fprintln(os.Stderr, "")
 
 	for _, entity := range privring {
-		//for _, ident := range entity.Identities {
 		if entity.PrivateKey != nil && entity.PrivateKey.Encrypted {
-			//fmt.Println("Decrypting private key using passphrase")
 			entity.PrivateKey.Decrypt(pass)
-			//if err != nil  && verbose {
-			//	fmt.Println("Failed to decrypt key")
-			//}
 		}
 
 		for _, subkey := range entity.Subkeys {
 			if subkey.PrivateKey != nil && subkey.PrivateKey.Encrypted {
 				subkey.PrivateKey.Decrypt(pass)
-				//if err != nil && verbose {
-				//	fmt.Println("Failed to decrypt subkey")
-				//}
 			}
 		}
-		//if strings.Contains(ident.Name, name) {
-		//	return entity
-		//}
-		//}
 	}
-
-	//privkey := findKey(privring, recipient)
-	//if privkey == nil {
-	//	return nil, errors.New("Associated private key not found.")
-	//}
 
 	md, err := openpgp.ReadMessage(block.Body, privring, nil, nil)
 	if err != nil {
@@ -453,7 +398,6 @@ func (rdr *serverContentReader) Name() string {
 }
 
 func (rdr *serverContentReader) Read(p []byte) (int, error) {
-	//rdr.namebytes = []byte("almostthere")
 	fmt.Println("rdr.n",rdr.n)
 	headerlength := 120
 	if rdr.n < headerlength {
@@ -488,14 +432,11 @@ type clientContentReader struct {
 
 func (rdr *clientContentReader) Read(p []byte) (int, error) {
 
-	//fmt.Println("len", len(p))
-	//fmt.Println("rdr.n", rdr.n)
 
 	headerlength := 120
 	if rdr.n < headerlength {
 		namebytes := []byte(rdr.name)
 		space := []byte(" ")
-		//fmt.Println("namebytes", len(namebytes))
 
 		var i int
 		for i = 0; i <= len(p)-1; i++ {
@@ -510,13 +451,9 @@ func (rdr *clientContentReader) Read(p []byte) (int, error) {
 			}
 
 
-			//if i >= len(namebytes) {
-			//	return i,nil
-			//}
 			p[i] = namebytes[rdr.n]
 			rdr.n = rdr.n + 1
 		}
-		//rdr.n = rdr.n + i
 		return i,nil
 	}
 
@@ -534,19 +471,6 @@ func (rdr *clientContentReader) Read(p []byte) (int, error) {
 
 	return blockLen, nil
 }
-
-/*func getNewContent(name string) io.Reader {
-	return &contentReader{}
-
-	//rawbytes, err := ioutil.ReadAll(os.Stdin)
-	//if err != nil {
-	//	panic(err)
-	//}
-
-	//return Add{Name: name, Content: rawbytes}
-
-}
-*/
 
 func hasCmd(cmdname string) bool {
 	for i := range os.Args {
@@ -955,20 +879,24 @@ func main() {
 
 			///newcontent := getNewContent(add)
 
-			//if recipient != "" {
-			//	encbytes, err := encryptOpenpgp(os.Stdin, recipient, gpghome)
-			//	if err != nil {
-			//		fmt.Println("Failed to encrypt.")
-			//	}
-			//	newcontent = encbytes
-			//}
+			var encbytes []byte
+			var err error
+			if recipient != "" {
+				encbytes, err = encryptOpenpgp(os.Stdin, recipient, gpghome)
+				if err != nil {
+					fmt.Println("Failed to encrypt.")
+				}
+			}
 
 			//contentbytes, err := json.Marshal(newcontent)
 
 			// construct reader that spits out: name\nDATA... stream
-			//buf := bytes.NewBuffer(contentbytes)
 			//newcontentReader := getNewContent()
 			newcontent := &clientContentReader{ name: add, r: os.Stdin }
+			if len(encbytes) != 0 {
+				buf := bytes.NewBuffer(encbytes)
+				newcontent.r = buf
+			}
 			resp, err := http.Post(fmt.Sprintf("http://localhost:%d/add?target=%s", port, serverhash), "application/json", newcontent)
 
 			if err != nil {
