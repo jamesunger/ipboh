@@ -77,11 +77,6 @@ type Entry struct {
 	Hash string
 }
 
-type Add struct {
-	Name    string
-	Content []byte
-}
-
 func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup) {
 	list, err := corenet.Listen(n, "/pack/index")
 	if err != nil {
