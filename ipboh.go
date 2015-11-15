@@ -26,6 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"runtime"
+	"github.com/dustin/go-humanize"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -75,6 +76,8 @@ type Index struct {
 type Entry struct {
 	Name string
 	Hash string
+	Timestamp time.Time
+	Size int
 }
 
 func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup) {
@@ -183,7 +186,7 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.Wai
 			panic(err)
 		}
 		fmt.Println("Added:", key.B58String())
-		entry := Entry{Name: serverReader.Name(), Hash: key.B58String()}
+		entry := Entry{Timestamp: time.Now(), Size: serverReader.n-120, Name: serverReader.Name(), Hash: key.B58String()}
 		index.Entries = append(index.Entries, &entry)
 
 		err = saveIndex(index, dspath)
@@ -956,7 +959,9 @@ func main() {
 			for i := len(entrylist.Entries)-1; i >= 0; i-- {
 
 				if verbose {
-					fmt.Println(entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
+					//ts := entrylist.Entries[i].Timestamp.Format(time.RFC3339)
+					ts := entrylist.Entries[i].Timestamp.Format("2006-01-02T15:04")
+					fmt.Println(entrylist.Entries[i].Hash, ts, humanize.Bytes(uint64(entrylist.Entries[i].Size)),entrylist.Entries[i].Name)
 					continue
 				}
 
