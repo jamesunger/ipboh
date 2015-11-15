@@ -26,7 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"runtime"
-	"github.com/dustin/go-humanize"
+	"github.com/pivotal-golang/bytefmt"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -961,7 +961,7 @@ func main() {
 				if verbose {
 					//ts := entrylist.Entries[i].Timestamp.Format(time.RFC3339)
 					ts := entrylist.Entries[i].Timestamp.Format("2006-01-02T15:04")
-					fmt.Println(entrylist.Entries[i].Hash, ts, humanize.Bytes(uint64(entrylist.Entries[i].Size)),entrylist.Entries[i].Name)
+					fmt.Println(entrylist.Entries[i].Hash, ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)),entrylist.Entries[i].Name)
 					continue
 				}
 
