@@ -133,7 +133,7 @@ func newDirNode() *dag.Node {
 	}*/
 }
 
-func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup, dspath string) {
+func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mutex, wg *sync.WaitGroup, dspath string) {
 	list, err := corenet.Listen(n, "/pack/add")
 	if err != nil {
 		panic(err)
@@ -187,7 +187,10 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.Wai
 		}
 		fmt.Println("Added:", key.B58String())
 		entry := Entry{Timestamp: time.Now(), Size: serverReader.n-120, Name: serverReader.Name(), Hash: key.B58String()}
+
+		mtx.Lock()
 		index.Entries = append(index.Entries, &entry)
+		mtx.Unlock()
 
 		err = saveIndex(index, dspath)
 		if err != nil {
@@ -789,6 +792,7 @@ func main() {
 			panic(err)
 		}
 		n = node
+		fmt.Println("initialized..")
 	} else {
 		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
 		if err != nil {
@@ -826,9 +830,10 @@ func main() {
 
 
 		index = loadIndex(dspath)
+		mtx := sync.Mutex{}
 
 		go handleIndex(n, ctx, index, &wg)
-		go handleAdd(n, ctx, index, &wg, dspath)
+		go handleAdd(n, ctx, index, &mtx, &wg, dspath)
 		wg.Wait()
 
 		// make sure we have a serverhash, we'll need it for client or clientserver
