@@ -35,7 +35,7 @@ To run the server, somewhere:
  ipboh server
 ```
 
-If run for the first time, it will print out the IPFS ID which is needed by the client. Data by default with be persisted in /tmp/ipboh-data and can be overridden with the -d flag. Hosting behind a NAT is currently problematic from what I've noticed.
+If run for the first time, it will print out the IPFS ID which is needed by the client. Data will be in ~/.ipfs. Hosting behind a NAT is currently problematic from what I've noticed.
 
 Then ipboh may be used as a client on another host to list entries:
 ```
