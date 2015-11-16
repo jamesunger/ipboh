@@ -730,13 +730,20 @@ func main() {
 	var port int
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
-	flag.StringVar(&dspath, "d", "/tmp/ipboh-data", "Data store path, by default /tmp/ipboh-data")
+	//flag.StringVar(&dspath, "d", "/tmp/ipboh-data", "Data store path, by default /tmp/ipboh-data")
 	flag.StringVar(&gpghome, "g", gpghomeDefault, "GPG homedir.")
 	flag.StringVar(&gpgpass, "gpass", "", "GPG password. This is insecure and only used on Windows where reading from the terminal breaks.")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
 	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
-	flag.Parse()
+
+
+	if runtime.GOOS == "windows" {
+		dspath = fmt.Sprintf("%s\\ipfsrepo",home)
+	} else {
+		dspath = fmt.Sprintf("%s/.ipfs",home)
+	}
+
 
 	server = hasCmd("server")
 	if hasCmd("add") {
@@ -753,14 +760,7 @@ func main() {
 	var n *core.IpfsNode
 
 	if server || clientserver {
-		var ipfsrepopath string
-
-		if runtime.GOOS == "windows" {
-			ipfsrepopath = fmt.Sprintf("%s\\ipfsrepo",home)
-		} else {
-			ipfsrepopath = fmt.Sprintf("%s/.ipfs",home)
-		}
-		r, err := fsrepo.Open(ipfsrepopath)
+		r, err := fsrepo.Open(dspath)
 		//if err != nil && strings.Contains(fmt.Sprintf("%s",err),"temporar")
 		if err != nil {
 			config, err := config.Init(os.Stdout, 2048)
@@ -769,11 +769,11 @@ func main() {
 			}
 
 
-			if err := fsrepo.Init(ipfsrepopath, config); err != nil {
+			if err := fsrepo.Init(dspath, config); err != nil {
 				panic(err)
 			}
 
-			r, err = fsrepo.Open(ipfsrepopath)
+			r, err = fsrepo.Open(dspath)
 			if err != nil {
 				panic(err)
 			}
@@ -823,10 +823,6 @@ func main() {
 	// startup the server if that is what we are doing
 	if server {
 
-		err := os.Mkdir(dspath, 0700)
-		if err != nil {
-			fmt.Println("Could not make dspath:", dspath)
-		}
 
 		index = loadIndex(dspath)
 
