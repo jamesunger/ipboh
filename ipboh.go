@@ -736,6 +736,7 @@ func main() {
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
 	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
+	flag.Parse()
 
 
 	if runtime.GOOS == "windows" {
