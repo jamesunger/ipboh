@@ -792,7 +792,14 @@ func main() {
 			panic(err)
 		}
 		n = node
-		fmt.Println("initialized..")
+
+		if server {
+			for _, addr := range node.PeerHost.Addrs() {
+				fmt.Printf("Swarm listening on %s\n", addr.String())
+			}
+		}
+
+
 	} else {
 		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
 		if err != nil {
