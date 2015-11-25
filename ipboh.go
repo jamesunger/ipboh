@@ -703,9 +703,9 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 	httpd.ListenAndServe()
 }
 
-func waitForClientserver(count int) error {
+func waitForClientserver(count int, port int) error {
 	for i := 0; i <= count; i++ {
-		resp, err := http.Get("http://localhost:9898/")
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/",port))
 		if err != nil {
 			time.Sleep(1 * time.Second)
 			continue
@@ -856,7 +856,7 @@ func main() {
 		files := make([]*os.File, 3, 3)
 		files[0], files[1], files[2] = os.Stdin, os.Stdout, os.Stderr
 		attrs := os.ProcAttr{Dir: ".", Env: os.Environ(), Files: files}
-		_, err = os.StartProcess(exePath, []string{exePath, "-c"}, &attrs)
+		_, err = os.StartProcess(exePath, []string{exePath, "-c", "-p", fmt.Sprintf("%d",port)}, &attrs)
 		if err != nil {
 			panic(err)
 		}
@@ -881,23 +881,6 @@ func main() {
 		// start client server
 	} else if clientserver {
 
-		/*if len(n.Peerstore.Addrs(target)) == 0 {
-			if verbose {
-				fmt.Println("Looking for peer: ", target.Pretty())
-			}
-			ctx, cancel := context.WithTimeout(ctx, 40*time.Second)
-			defer cancel()
-			p, err := n.Routing.FindPeer(ctx, target)
-			if err != nil {
-				fmt.Println("Failed to find peer: ", err)
-				return
-			}
-			if verbose {
-				fmt.Println("Found peer: ", p.Addrs)
-			}
-			n.Peerstore.AddAddrs(p.ID, p.Addrs, peer.TempAddrTTL)
-		}*/
-
 		wg.Add(1)
 		startClientServer(ctx, n, port)
 
@@ -905,7 +888,7 @@ func main() {
 	} else {
 		if spawnClientserver {
 			//fmt.Println("Sleeping for 10 seconds...\n")
-			err := waitForClientserver(20)
+			err := waitForClientserver(20,port)
 			if err != nil {
 				panic(err)
 			}
@@ -914,7 +897,6 @@ func main() {
 		// add something
 		if add != "" {
 
-			///newcontent := getNewContent(add)
 
 			var encbytes []byte
 			var err error
@@ -925,10 +907,6 @@ func main() {
 				}
 			}
 
-			//contentbytes, err := json.Marshal(newcontent)
-
-			// construct reader that spits out: name\nDATA... stream
-			//newcontentReader := getNewContent()
 			newcontent := &clientContentReader{ name: add, r: os.Stdin }
 			if len(encbytes) != 0 {
 				buf := bytes.NewBuffer(encbytes)
@@ -941,7 +919,7 @@ func main() {
 			}
 			defer resp.Body.Close()
 
-			// cat something
+		// cat something
 		} else if catarg != "" {
 
 			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s&target=%s", port, catarg, serverhash))
