@@ -718,6 +718,36 @@ func waitForClientserver(count int) error {
 	return errors.New("Waited too long for clientserver")
 }
 
+func hasHideList(entrylist *Index) bool {
+	for i := range entrylist.Entries {
+		if entrylist.Entries[i].Name == "hidelist" {
+			return true
+		}
+	}
+	return false
+}
+
+func getHideList(serverhash string, port int, entrylist *Index) map[string]bool {
+	entries := make(map[string]bool)
+	if !hasHideList(entrylist) {
+		return entries
+	}
+
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s&target=%s", port, "hidelist", serverhash))
+	if err != nil {
+		panic(err)
+	}
+
+	entries["hidelist"] = true
+	rawbytes, err := ioutil.ReadAll(resp.Body)
+	entriesl := strings.Split(string(rawbytes), "\n")
+	for i := range entriesl {
+		entries[entriesl[i]] = true
+	}
+	return entries
+}
+
+
 func main() {
 
 	var wg sync.WaitGroup
@@ -964,6 +994,8 @@ func main() {
 			}
 
 			seen := make(map[string]bool)
+			hidelist := getHideList(serverhash, port, entrylist)
+
 			// reverse the list
 			for i := len(entrylist.Entries)-1; i >= 0; i-- {
 
@@ -975,10 +1007,12 @@ func main() {
 				}
 
 				_, exists := seen[entrylist.Entries[i].Name];
-				if !exists {
+				_, existsh := hidelist[entrylist.Entries[i].Name];
+				if !exists && !existsh {
 					fmt.Println(entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
 				}
 				seen[entrylist.Entries[i].Name] = true
+
 			}
 
 		}
