@@ -66,7 +66,7 @@ import (
 
 type IpbohConfig struct {
 	Serverhash string
-	Recipient  string
+	Port  int
 }
 
 type Index struct {
@@ -512,11 +512,12 @@ func readIpbohConfig(filepath string) *IpbohConfig {
 		return ipbohconfig
 	}
 
+
 	return ipbohconfig
 
 }
 
-func saveIpohConfig(ipbohconfig *IpbohConfig, filepath string) error {
+func saveIpbohConfig(ipbohconfig *IpbohConfig, filepath string) error {
 	//fmt.Println("Saving",ipbohconfig,"to",filepath)
 	rawb, err := json.Marshal(ipbohconfig)
 	if err != nil {
@@ -524,13 +525,12 @@ func saveIpohConfig(ipbohconfig *IpbohConfig, filepath string) error {
 		return err
 	}
 
-	fh, err := os.OpenFile(filepath, os.O_RDWR, 0600)
+	os.Remove(filepath)
+
+	fh, err := os.Create(filepath)
 	if err != nil {
-		fh, err = os.Create(filepath)
-		if err != nil {
-			fmt.Println(err)
-			return err
-		}
+		fmt.Println(err)
+		return err
 	}
 	defer fh.Close()
 
@@ -565,36 +565,28 @@ func getGpghomeDir(home string) string {
 
 
 
-func getUpdateConfig(conft string, item string) string {
+func getUpdateConfig(serverhash string, port int) (string,int) {
 
 	home := getHomeDir()
 
 	filepath := fmt.Sprintf("%s%s.ipbohrc", home, string(os.PathSeparator))
 	ipbohconfig := readIpbohConfig(filepath)
 
-	if item == "" && conft == "Recipient" {
-		return ipbohconfig.Recipient
+	if ipbohconfig.Port == 0 {
+		ipbohconfig.Port = 9898
 	}
 
-	if item == "" && conft == "Serverhash" {
-		return ipbohconfig.Serverhash
+	if port != 9898 && ipbohconfig.Port != port {
+		ipbohconfig.Port = port
+		saveIpbohConfig(ipbohconfig, filepath)
 	}
 
-	if conft == "Recipient" && ipbohconfig.Recipient != item {
-		//fmt.Println("Saving recipient.")
-		ipbohconfig.Recipient = item
-		saveIpohConfig(ipbohconfig, filepath)
-		return item
+	if serverhash != "" && ipbohconfig.Serverhash != serverhash {
+		ipbohconfig.Serverhash = serverhash
+		saveIpbohConfig(ipbohconfig, filepath)
 	}
 
-	if conft == "Serverhash" && ipbohconfig.Serverhash != item {
-		//fmt.Println("Saving serverhash:",item)
-		ipbohconfig.Serverhash = item
-		saveIpohConfig(ipbohconfig, filepath)
-		return item
-	}
-
-	return item
+	return ipbohconfig.Serverhash, ipbohconfig.Port
 
 }
 
@@ -788,11 +780,11 @@ func main() {
 		catarg = getCmdArg("cat")
 	}
 
-	serverhash = getUpdateConfig("Serverhash", serverhash)
 
 	var ctx context.Context
 	var n *core.IpfsNode
 
+	serverhash,port = getUpdateConfig(serverhash,port)
 	if server || clientserver {
 		r, err := fsrepo.Open(dspath)
 		//if err != nil && strings.Contains(fmt.Sprintf("%s",err),"temporar")
@@ -873,18 +865,14 @@ func main() {
 		go handleAdd(n, ctx, index, &mtx, &wg, dspath)
 		wg.Wait()
 
-		// make sure we have a serverhash, we'll need it for client or clientserver
-	} else if serverhash == "" {
-		fmt.Println("Need to specify a remote server node id e.g. -h QmarTZGZDhBpDY5wgx9qSJrFcNokF37iD44Vk2FTYGPyBs")
-		return
 
-		// start client server
+	// start client server
 	} else if clientserver {
 
 		wg.Add(1)
 		startClientServer(ctx, n, port)
 
-		// run client command
+	// run client command
 	} else {
 		if spawnClientserver {
 			//fmt.Println("Sleeping for 10 seconds...\n")
@@ -893,6 +881,12 @@ func main() {
 				panic(err)
 			}
 		}
+
+		if serverhash == "" {
+			fmt.Println("Need to specify a remote server node id e.g. -h QmarTZGZDhBpDY5wgx9qSJrFcNokF37iD44Vk2FTYGPyBs")
+			return
+		}
+
 
 		// add something
 		if add != "" {
