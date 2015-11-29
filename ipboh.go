@@ -579,7 +579,7 @@ func getUpdateConfig(serverhash string, port int) (string, int) {
 
 }
 
-func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
+func startClientServer(ctx context.Context, n *core.IpfsNode, port int, defsrvhash string) {
 
 	//resettime := 60*time.Second
 	resettime := 1800 * time.Second
@@ -589,6 +589,54 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 		//fmt.Println("Timer expired")
 		os.Exit(0)
 	}()
+
+	http.HandleFunc("/areuthere", func(w http.ResponseWriter, r *http.Request) {
+		return
+	})
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		var targethash string
+		ar,e := r.Form["target"]
+
+		if !e {
+			targethash = defsrvhash
+		} else {
+			targethash = ar[0]
+		}
+		_,verbose := r.Form["verbose"]
+
+		target, err := peer.IDB58Decode(targethash)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("%s", err), 500)
+		}
+		entrylist := getEntryList(n, target)
+
+		if verbose {
+			fmt.Fprintln(w,"<html><body><p><a href=\"/\">(default list)</a></p><p><pre><ul style=\"list-style: none;\">")
+			for i := len(entrylist.Entries) - 1; i >= 0; i-- {
+				ts := entrylist.Entries[i].Timestamp.Format("2006-01-02T15:04")
+				fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> %s %s %s</li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash,ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)), entrylist.Entries[i].Name)
+			}
+			fmt.Fprintln(w,"</ul></pre></p></body></html>")
+		} else {
+
+			seen := make(map[string]bool)
+			hidelist := getHideList(targethash, port, entrylist)
+
+			fmt.Fprintln(w,"<html><body><p><a href=\"/?verbose=true\">(verbose list)</a></p><p><pre><ul style=\"list-style: none;\">")
+			for i := len(entrylist.Entries) - 1; i >= 0; i-- {
+				_, exists := seen[entrylist.Entries[i].Name]
+				_, existsh := hidelist[entrylist.Entries[i].Name]
+				if !exists && !existsh {
+					fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> %s</li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
+				}
+				seen[entrylist.Entries[i].Name] = true
+			}
+			fmt.Fprintln(w,"</ul></pre></p></body></html>")
+		}
+		return
+	})
 
 	http.HandleFunc("/add", func(w http.ResponseWriter, r *http.Request) {
 		timer.Reset(resettime)
@@ -685,13 +733,13 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 
 func waitForClientserver(count int, port int) error {
 	for i := 0; i <= count; i++ {
-		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/areuthere", port))
 		if err != nil {
 			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		if resp.StatusCode == 404 {
+		if resp.StatusCode == 200 {
 			return nil
 		}
 	}
@@ -917,10 +965,10 @@ func main() {
 			panic(err)
 		}
 	} else {
-		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/areuthere", port))
 		if err != nil {
 			spawnClientserver = true
-		} else if resp.StatusCode == 404 {
+		} else if resp.StatusCode == 200 {
 			spawnClientserver = false
 		} else {
 			spawnClientserver = true
@@ -959,7 +1007,7 @@ func main() {
 	// start client server
 	} else if clientserver {
 
-		startClientServer(ctx, n, port)
+		startClientServer(ctx, n, port, serverhash)
 
 	// run client command
 	} else {
