@@ -727,6 +727,134 @@ func getHideList(serverhash string, port int, entrylist *Index) map[string]bool 
 	return entries
 }
 
+func listEntries(port int, serverhash string, verbose bool) {
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/ls?target=%s", port, serverhash))
+	if err != nil {
+		panic(err)
+	}
+
+	entrylist := &Index{}
+	rawbytes, err := ioutil.ReadAll(resp.Body)
+	//fmt.Println("got raw bytes", string(rawbytes))
+	if err != nil {
+		fmt.Println("Error reading response from localhost\n")
+		panic(err)
+	}
+	err = json.Unmarshal(rawbytes, entrylist)
+	if err != nil {
+		fmt.Println("Failed to unmarshal:", err)
+	}
+
+	seen := make(map[string]bool)
+	hidelist := getHideList(serverhash, port, entrylist)
+
+	// reverse the list
+	for i := len(entrylist.Entries) - 1; i >= 0; i-- {
+
+		if verbose {
+			//ts := entrylist.Entries[i].Timestamp.Format(time.RFC3339)
+			ts := entrylist.Entries[i].Timestamp.Format("2006-01-02T15:04")
+			fmt.Println(entrylist.Entries[i].Hash, ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)), entrylist.Entries[i].Name)
+			continue
+		}
+
+		_, exists := seen[entrylist.Entries[i].Name]
+		_, existsh := hidelist[entrylist.Entries[i].Name]
+		if !exists && !existsh {
+			fmt.Println(entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
+		}
+		seen[entrylist.Entries[i].Name] = true
+
+	}
+
+}
+
+func catContent(catarg string, gpghome string, gpgpass string, port int, serverhash string) {
+
+	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s&target=%s", port, catarg, serverhash))
+	if err != nil {
+		panic(err)
+	}
+
+	bytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	ispgp := false
+	if len(bytes) >= 40 {
+		initialbytes := bytes[0:40]
+		if strings.Contains(string(initialbytes), "BEGIN PGP MESSAGE") {
+			ispgp = true
+		}
+	}
+
+	if ispgp {
+		//fmt.Println("orig", string(bytes))
+		bytes, err = decryptOpenpgp(bytes, gpghome, []byte(gpgpass))
+		if err != nil {
+			fmt.Println("Failed to decrypt:", err)
+			return
+		}
+	}
+
+	os.Stdout.Write(bytes)
+
+}
+
+func addContent(add string, gpghome string, recipient string, port int, serverhash string) {
+
+	var encbytes []byte
+	var err error
+	if recipient != "" {
+		encbytes, err = encryptOpenpgp(os.Stdin, recipient, gpghome)
+		if err != nil {
+			fmt.Println("Failed to encrypt.")
+		}
+	}
+
+	newcontent := &clientContentReader{name: add, r: os.Stdin}
+	if len(encbytes) != 0 {
+		buf := bytes.NewBuffer(encbytes)
+		newcontent.r = buf
+	}
+	resp, err := http.Post(fmt.Sprintf("http://localhost:%d/add?target=%s", port, serverhash), "application/json", newcontent)
+
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+}
+
+func startupIPFS(dspath string, ctx *context.Context) (*core.IpfsNode, error) {
+	r, err := fsrepo.Open(dspath)
+	if err != nil {
+		config, err := config.Init(os.Stdout, 2048)
+		if err != nil {
+			return nil,err
+		}
+
+		if err := fsrepo.Init(dspath, config); err != nil {
+			return nil,err
+		}
+
+		r, err = fsrepo.Open(dspath)
+		if err != nil {
+			return nil,err
+		}
+	}
+
+
+	node, err := core.NewNode(*ctx, &core.BuildCfg{Online: true, Repo: r})
+	if err != nil {
+		return nil,err
+	}
+
+
+	return node, nil
+
+}
+
 func main() {
 
 	var wg sync.WaitGroup
@@ -742,7 +870,6 @@ func main() {
 	var port int
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
-	//flag.StringVar(&dspath, "d", "/tmp/ipboh-data", "Data store path, by default /tmp/ipboh-data")
 	flag.StringVar(&gpghome, "g", gpghomeDefault, "GPG homedir.")
 	flag.StringVar(&gpgpass, "gpass", "", "GPG password. This is insecure and only used on Windows where reading from the terminal breaks.")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
@@ -765,62 +892,44 @@ func main() {
 		catarg = getCmdArg("cat")
 	}
 
-	var ctx context.Context
 	var n *core.IpfsNode
+	var err error
 
+	// grab or update configs
 	serverhash, port = getUpdateConfig(serverhash, port)
-	if server || clientserver {
-		r, err := fsrepo.Open(dspath)
-		//if err != nil && strings.Contains(fmt.Sprintf("%s",err),"temporar")
-		if err != nil {
-			config, err := config.Init(os.Stdout, 2048)
-			if err != nil {
-				panic(err)
-			}
 
-			if err := fsrepo.Init(dspath, config); err != nil {
-				panic(err)
-			}
+	// 'phase 1' initial setup...
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-			r, err = fsrepo.Open(dspath)
-			if err != nil {
-				panic(err)
-			}
-		}
-
-		cotx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		ctx = cotx
-
-		node, err := core.NewNode(ctx, &core.BuildCfg{Online: true, Repo: r})
+	if server {
+		n, err = startupIPFS(dspath, &ctx)
 		if err != nil {
 			panic(err)
 		}
-		n = node
 
-		if server {
-			for _, addr := range node.PeerHost.Addrs() {
-				fmt.Printf("Swarm listening on %s\n", addr.String())
-			}
+		for _, addr := range n.PeerHost.Addrs() {
+			fmt.Printf("Swarm listening on %s\n", addr.String())
 		}
-
+	} else if clientserver {
+		n, err = startupIPFS(dspath, &ctx)
+		if err != nil {
+			panic(err)
+		}
 	} else {
 		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
 		if err != nil {
-			//fmt.Println("Need to spawn..", clientserver,os.Args);
 			spawnClientserver = true
 		} else if resp.StatusCode == 404 {
-			//fmt.Println("No need to spawn..");
 			spawnClientserver = false
 		} else {
-			//fmt.Println("Need to spawn..", resp);
 			spawnClientserver = true
 		}
 
 	}
 
+	// spawn a separate process to launch client server if it is not already running
 	if spawnClientserver {
-		// FIXME to be portable
 		var exePath string
 		exePath, err := godaemon.GetExecutablePath()
 		if err != nil {
@@ -836,6 +945,7 @@ func main() {
 		}
 	}
 
+	// 'phase 2' do the things
 	// startup the server if that is what we are doing
 	if server {
 
@@ -846,14 +956,15 @@ func main() {
 		go handleAdd(n, ctx, index, &mtx, &wg, dspath)
 		wg.Wait()
 
-		// start client server
+	// start client server
 	} else if clientserver {
 
-		wg.Add(1)
 		startClientServer(ctx, n, port)
 
-		// run client command
+	// run client command
 	} else {
+
+
 		if spawnClientserver {
 			//fmt.Println("Sleeping for 10 seconds...\n")
 			err := waitForClientserver(20, port)
@@ -867,103 +978,18 @@ func main() {
 			return
 		}
 
+
 		// add something
 		if add != "" {
+			addContent(add, gpghome, recipient, port, serverhash)
 
-			var encbytes []byte
-			var err error
-			if recipient != "" {
-				encbytes, err = encryptOpenpgp(os.Stdin, recipient, gpghome)
-				if err != nil {
-					fmt.Println("Failed to encrypt.")
-				}
-			}
-
-			newcontent := &clientContentReader{name: add, r: os.Stdin}
-			if len(encbytes) != 0 {
-				buf := bytes.NewBuffer(encbytes)
-				newcontent.r = buf
-			}
-			resp, err := http.Post(fmt.Sprintf("http://localhost:%d/add?target=%s", port, serverhash), "application/json", newcontent)
-
-			if err != nil {
-				panic(err)
-			}
-			defer resp.Body.Close()
-
-			// cat something
+		// cat something
 		} else if catarg != "" {
+			catContent(catarg, gpghome, gpgpass, port, serverhash)
 
-			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s&target=%s", port, catarg, serverhash))
-			if err != nil {
-				panic(err)
-			}
-
-			bytes, err := ioutil.ReadAll(resp.Body)
-			if err != nil {
-				panic(err)
-			}
-
-			ispgp := false
-			if len(bytes) >= 40 {
-				initialbytes := bytes[0:40]
-				if strings.Contains(string(initialbytes), "BEGIN PGP MESSAGE") {
-					ispgp = true
-				}
-			}
-
-			if ispgp {
-				//fmt.Println("orig", string(bytes))
-				bytes, err = decryptOpenpgp(bytes, gpghome, []byte(gpgpass))
-				if err != nil {
-					fmt.Println("Failed to decrypt:", err)
-					return
-				}
-			}
-
-			os.Stdout.Write(bytes)
-
-			// fetch entry list by default
+		// fetch entry list by default
 		} else {
-
-			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/ls?target=%s", port, serverhash))
-			if err != nil {
-				panic(err)
-			}
-
-			entrylist := &Index{}
-			rawbytes, err := ioutil.ReadAll(resp.Body)
-			//fmt.Println("got raw bytes", string(rawbytes))
-			if err != nil {
-				fmt.Println("Error reading response from localhost\n")
-				panic(err)
-			}
-			err = json.Unmarshal(rawbytes, entrylist)
-			if err != nil {
-				fmt.Println("Failed to unmarshal:", err)
-			}
-
-			seen := make(map[string]bool)
-			hidelist := getHideList(serverhash, port, entrylist)
-
-			// reverse the list
-			for i := len(entrylist.Entries) - 1; i >= 0; i-- {
-
-				if verbose {
-					//ts := entrylist.Entries[i].Timestamp.Format(time.RFC3339)
-					ts := entrylist.Entries[i].Timestamp.Format("2006-01-02T15:04")
-					fmt.Println(entrylist.Entries[i].Hash, ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)), entrylist.Entries[i].Name)
-					continue
-				}
-
-				_, exists := seen[entrylist.Entries[i].Name]
-				_, existsh := hidelist[entrylist.Entries[i].Name]
-				if !exists && !existsh {
-					fmt.Println(entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
-				}
-				seen[entrylist.Entries[i].Name] = true
-
-			}
+			listEntries(port, serverhash, verbose)
 
 		}
 	}
