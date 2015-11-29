@@ -16,7 +16,6 @@
 *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-
 package main
 
 import (
@@ -25,8 +24,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"runtime"
-	"github.com/pivotal-golang/bytefmt"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -35,6 +32,7 @@ import (
 	peer "github.com/ipfs/go-ipfs/p2p/peer"
 	pin "github.com/ipfs/go-ipfs/pin"
 	fsrepo "github.com/ipfs/go-ipfs/repo/fsrepo"
+	"github.com/pivotal-golang/bytefmt"
 	"golang.org/x/crypto/openpgp"
 	"golang.org/x/crypto/openpgp/armor"
 	"golang.org/x/crypto/ssh/terminal"
@@ -42,6 +40,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	//"syscall"
@@ -59,14 +58,14 @@ import (
 	ft "github.com/ipfs/go-ipfs/unixfs"
 
 	"code.google.com/p/go.net/context"
+	"github.com/VividCortex/godaemon"
 	dagutils "github.com/ipfs/go-ipfs/merkledag/utils"
 	config "github.com/ipfs/go-ipfs/repo/config"
-	"github.com/VividCortex/godaemon"
 )
 
 type IpbohConfig struct {
 	Serverhash string
-	Port  int
+	Port       int
 }
 
 type Index struct {
@@ -74,10 +73,10 @@ type Index struct {
 }
 
 type Entry struct {
-	Name string
-	Hash string
+	Name      string
+	Hash      string
 	Timestamp time.Time
-	Size int
+	Size      int
 }
 
 func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup) {
@@ -154,11 +153,9 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 		newdirnode := newDirNode()
 		e := dagutils.NewDagEditor(NewFlatfsDagService(dspath), newdirnode)
 
-
-
 		// wrap the connection in the serverContentReader so we can get our
 		// header
-		serverReader := &serverContentReader{ r: con }
+		serverReader := &serverContentReader{r: con}
 		chnk, err := chunk.FromString(serverReader, "rabin")
 		if err != nil {
 			panic(err)
@@ -186,7 +183,7 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 			panic(err)
 		}
 		fmt.Println("Added:", key.B58String())
-		entry := Entry{Timestamp: time.Now(), Size: serverReader.n-120, Name: serverReader.Name(), Hash: key.B58String()}
+		entry := Entry{Timestamp: time.Now(), Size: serverReader.n - 120, Name: serverReader.Name(), Hash: key.B58String()}
 
 		mtx.Lock()
 		index.Entries = append(index.Entries, &entry)
@@ -254,7 +251,7 @@ func findKey(keyring openpgp.EntityList, name string) *openpgp.Entity {
 }
 
 func decryptOpenpgp(data []byte, gpghome string, pass []byte) ([]byte, error) {
-	privkeyfile, err := os.Open(fmt.Sprintf("%s%ssecring.gpg",gpghome, string(os.PathSeparator)))
+	privkeyfile, err := os.Open(fmt.Sprintf("%s%ssecring.gpg", gpghome, string(os.PathSeparator)))
 	if err != nil {
 		fmt.Println("Failed to open secring", err)
 		return nil, err
@@ -389,9 +386,9 @@ func makeIndex() *Index {
 }
 
 type serverContentReader struct {
-	r io.Reader
+	r         io.Reader
 	namebytes []byte
-	n int
+	n         int
 }
 
 func (rdr *serverContentReader) Name() string {
@@ -399,13 +396,13 @@ func (rdr *serverContentReader) Name() string {
 }
 
 func (rdr *serverContentReader) Read(p []byte) (int, error) {
-	fmt.Println("rdr.n",rdr.n)
+	fmt.Println("rdr.n", rdr.n)
 	headerlength := 120
 	if rdr.n < headerlength {
-		rdr.namebytes = make([]byte,120,120)
+		rdr.namebytes = make([]byte, 120, 120)
 		blockLen, err := rdr.r.Read(rdr.namebytes)
 		if err != nil {
-			return blockLen,err
+			return blockLen, err
 		}
 		rdr.n = rdr.n + blockLen
 	}
@@ -421,18 +418,16 @@ func (rdr *serverContentReader) Read(p []byte) (int, error) {
 
 	rdr.n = rdr.n + blockLen
 
-
 	return blockLen, nil
 }
 
 type clientContentReader struct {
-	r io.Reader
+	r    io.Reader
 	name string
-	n int
+	n    int
 }
 
 func (rdr *clientContentReader) Read(p []byte) (int, error) {
-
 
 	headerlength := 120
 	if rdr.n < headerlength {
@@ -442,7 +437,7 @@ func (rdr *clientContentReader) Read(p []byte) (int, error) {
 		var i int
 		for i = 0; i <= len(p)-1; i++ {
 			if rdr.n >= headerlength {
-				return i,nil
+				return i, nil
 			}
 
 			if rdr.n >= len(namebytes) {
@@ -451,11 +446,10 @@ func (rdr *clientContentReader) Read(p []byte) (int, error) {
 				continue
 			}
 
-
 			p[i] = namebytes[rdr.n]
 			rdr.n = rdr.n + 1
 		}
-		return i,nil
+		return i, nil
 	}
 
 	blockLen, err := rdr.r.Read(p)
@@ -468,7 +462,6 @@ func (rdr *clientContentReader) Read(p []byte) (int, error) {
 	}
 
 	rdr.n = rdr.n + blockLen
-
 
 	return blockLen, nil
 }
@@ -511,7 +504,6 @@ func readIpbohConfig(filepath string) *IpbohConfig {
 		fmt.Println("Failed to unmarshall:", err)
 		return ipbohconfig
 	}
-
 
 	return ipbohconfig
 
@@ -562,10 +554,7 @@ func getGpghomeDir(home string) string {
 	return gpgdir
 }
 
-
-
-
-func getUpdateConfig(serverhash string, port int) (string,int) {
+func getUpdateConfig(serverhash string, port int) (string, int) {
 
 	home := getHomeDir()
 
@@ -592,9 +581,8 @@ func getUpdateConfig(serverhash string, port int) (string,int) {
 
 func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 
-
 	//resettime := 60*time.Second
-	resettime := 1800*time.Second
+	resettime := 1800 * time.Second
 	timer := time.NewTimer(resettime) // half hour
 	go func() {
 		<-timer.C
@@ -608,7 +596,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 		targethash := r.Form["target"][0]
 		target, err := peer.IDB58Decode(targethash)
 		if err != nil {
-			http.Error(w,fmt.Sprintf("%s",err),500)
+			http.Error(w, fmt.Sprintf("%s", err), 500)
 		}
 
 		con, err := corenet.Dial(n, target, "/pack/add")
@@ -632,7 +620,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 		targethash := r.Form["target"][0]
 		target, err := peer.IDB58Decode(targethash)
 		if err != nil {
-			http.Error(w,fmt.Sprintf("%s",err),500)
+			http.Error(w, fmt.Sprintf("%s", err), 500)
 		}
 
 		entrylist := getEntryList(n, target)
@@ -652,7 +640,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 		targethash := r.Form["target"][0]
 		target, err := peer.IDB58Decode(targethash)
 		if err != nil {
-			http.Error(w,fmt.Sprintf("%s",err),500)
+			http.Error(w, fmt.Sprintf("%s", err), 500)
 		}
 
 		// FIXME: validate this in case there is a 46 len name!
@@ -660,7 +648,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 		if len(hash) != 46 {
 			entrylist := getEntryList(n, target)
 			//fmt.Println(entrylist)
-			for i := len(entrylist.Entries)-1; i >= 0; i-- {
+			for i := len(entrylist.Entries) - 1; i >= 0; i-- {
 				if entrylist.Entries[i].Name == hash {
 					hash = entrylist.Entries[i].Hash
 					foundhash = true
@@ -697,7 +685,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int) {
 
 func waitForClientserver(count int, port int) error {
 	for i := 0; i <= count; i++ {
-		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/",port))
+		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
 		if err != nil {
 			time.Sleep(1 * time.Second)
 			continue
@@ -739,7 +727,6 @@ func getHideList(serverhash string, port int, entrylist *Index) map[string]bool 
 	return entries
 }
 
-
 func main() {
 
 	var wg sync.WaitGroup
@@ -750,7 +737,7 @@ func main() {
 	gpghomeDefault := getGpghomeDir(home)
 
 	var server, verbose, clientserver, spawnClientserver bool
-	var serverhash, add, dspath,gpghome,gpgpass string
+	var serverhash, add, dspath, gpghome, gpgpass string
 	var catarg, recipient string
 	var port int
 	flag.BoolVar(&verbose, "v", false, "Verbose")
@@ -763,13 +750,11 @@ func main() {
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
 	flag.Parse()
 
-
 	if runtime.GOOS == "windows" {
-		dspath = fmt.Sprintf("%s\\ipfsrepo",home)
+		dspath = fmt.Sprintf("%s\\ipfsrepo", home)
 	} else {
-		dspath = fmt.Sprintf("%s/.ipfs",home)
+		dspath = fmt.Sprintf("%s/.ipfs", home)
 	}
-
 
 	server = hasCmd("server")
 	if hasCmd("add") {
@@ -780,11 +765,10 @@ func main() {
 		catarg = getCmdArg("cat")
 	}
 
-
 	var ctx context.Context
 	var n *core.IpfsNode
 
-	serverhash,port = getUpdateConfig(serverhash,port)
+	serverhash, port = getUpdateConfig(serverhash, port)
 	if server || clientserver {
 		r, err := fsrepo.Open(dspath)
 		//if err != nil && strings.Contains(fmt.Sprintf("%s",err),"temporar")
@@ -793,7 +777,6 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
-
 
 			if err := fsrepo.Init(dspath, config); err != nil {
 				panic(err)
@@ -821,7 +804,6 @@ func main() {
 			}
 		}
 
-
 	} else {
 		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/", port))
 		if err != nil {
@@ -840,7 +822,7 @@ func main() {
 	if spawnClientserver {
 		// FIXME to be portable
 		var exePath string
-		exePath,err := godaemon.GetExecutablePath()
+		exePath, err := godaemon.GetExecutablePath()
 		if err != nil {
 			err = fmt.Errorf("failed to get pid: %v", err)
 		}
@@ -848,7 +830,7 @@ func main() {
 		files := make([]*os.File, 3, 3)
 		files[0], files[1], files[2] = os.Stdin, os.Stdout, os.Stderr
 		attrs := os.ProcAttr{Dir: ".", Env: os.Environ(), Files: files}
-		_, err = os.StartProcess(exePath, []string{exePath, "-c", "-p", fmt.Sprintf("%d",port)}, &attrs)
+		_, err = os.StartProcess(exePath, []string{exePath, "-c", "-p", fmt.Sprintf("%d", port)}, &attrs)
 		if err != nil {
 			panic(err)
 		}
@@ -857,7 +839,6 @@ func main() {
 	// startup the server if that is what we are doing
 	if server {
 
-
 		index = loadIndex(dspath)
 		mtx := sync.Mutex{}
 
@@ -865,18 +846,17 @@ func main() {
 		go handleAdd(n, ctx, index, &mtx, &wg, dspath)
 		wg.Wait()
 
-
-	// start client server
+		// start client server
 	} else if clientserver {
 
 		wg.Add(1)
 		startClientServer(ctx, n, port)
 
-	// run client command
+		// run client command
 	} else {
 		if spawnClientserver {
 			//fmt.Println("Sleeping for 10 seconds...\n")
-			err := waitForClientserver(20,port)
+			err := waitForClientserver(20, port)
 			if err != nil {
 				panic(err)
 			}
@@ -887,10 +867,8 @@ func main() {
 			return
 		}
 
-
 		// add something
 		if add != "" {
-
 
 			var encbytes []byte
 			var err error
@@ -901,7 +879,7 @@ func main() {
 				}
 			}
 
-			newcontent := &clientContentReader{ name: add, r: os.Stdin }
+			newcontent := &clientContentReader{name: add, r: os.Stdin}
 			if len(encbytes) != 0 {
 				buf := bytes.NewBuffer(encbytes)
 				newcontent.r = buf
@@ -913,7 +891,7 @@ func main() {
 			}
 			defer resp.Body.Close()
 
-		// cat something
+			// cat something
 		} else if catarg != "" {
 
 			resp, err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s&target=%s", port, catarg, serverhash))
@@ -936,7 +914,7 @@ func main() {
 
 			if ispgp {
 				//fmt.Println("orig", string(bytes))
-				bytes, err = decryptOpenpgp(bytes,gpghome,[]byte(gpgpass))
+				bytes, err = decryptOpenpgp(bytes, gpghome, []byte(gpgpass))
 				if err != nil {
 					fmt.Println("Failed to decrypt:", err)
 					return
@@ -969,17 +947,17 @@ func main() {
 			hidelist := getHideList(serverhash, port, entrylist)
 
 			// reverse the list
-			for i := len(entrylist.Entries)-1; i >= 0; i-- {
+			for i := len(entrylist.Entries) - 1; i >= 0; i-- {
 
 				if verbose {
 					//ts := entrylist.Entries[i].Timestamp.Format(time.RFC3339)
 					ts := entrylist.Entries[i].Timestamp.Format("2006-01-02T15:04")
-					fmt.Println(entrylist.Entries[i].Hash, ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)),entrylist.Entries[i].Name)
+					fmt.Println(entrylist.Entries[i].Hash, ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)), entrylist.Entries[i].Name)
 					continue
 				}
 
-				_, exists := seen[entrylist.Entries[i].Name];
-				_, existsh := hidelist[entrylist.Entries[i].Name];
+				_, exists := seen[entrylist.Entries[i].Name]
+				_, existsh := hidelist[entrylist.Entries[i].Name]
 				if !exists && !existsh {
 					fmt.Println(entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
 				}
