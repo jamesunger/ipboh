@@ -591,10 +591,12 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int, defsrvha
 	}()
 
 	http.HandleFunc("/areuthere", func(w http.ResponseWriter, r *http.Request) {
+		timer.Reset(resettime)
 		return
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		timer.Reset(resettime)
 		r.ParseForm()
 		var targethash string
 		ar,e := r.Form["target"]
@@ -616,7 +618,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int, defsrvha
 			fmt.Fprintln(w,"<html><body><p><a href=\"/\">(default list)</a></p><p><pre><ul style=\"list-style: none;\">")
 			for i := len(entrylist.Entries) - 1; i >= 0; i-- {
 				ts := entrylist.Entries[i].Timestamp.Format("2006-01-02T15:04")
-				fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> %s %s %s</li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash,ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)), entrylist.Entries[i].Name)
+				fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> %s %s <a href=\"/cat?hash=%s&target=%s\">%s</a></li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash,ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)), entrylist.Entries[i].Name, targethash, entrylist.Entries[i].Name)
 			}
 			fmt.Fprintln(w,"</ul></pre></p></body></html>")
 		} else {
@@ -629,7 +631,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int, defsrvha
 				_, exists := seen[entrylist.Entries[i].Name]
 				_, existsh := hidelist[entrylist.Entries[i].Name]
 				if !exists && !existsh {
-					fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> %s</li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
+					fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> <a href=\"/cat?hash=%s&target=%s\">%s</a></li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash, entrylist.Entries[i].Name, targethash, entrylist.Entries[i].Name)
 				}
 				seen[entrylist.Entries[i].Name] = true
 			}
@@ -693,6 +695,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int, defsrvha
 
 		// FIXME: validate this in case there is a 46 len name!
 		foundhash := false
+		w.Header().Set("Content-Disposition", fmt.Sprintf("filename=\"%s\"",hash))
 		if len(hash) != 46 {
 			entrylist := getEntryList(n, target)
 			//fmt.Println(entrylist)
@@ -722,6 +725,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int, defsrvha
 			http.Error(w, fmt.Sprintf("Error reading or writing entry:", err), 500)
 			return
 		}
+
 
 	})
 
