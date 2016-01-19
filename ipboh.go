@@ -27,10 +27,7 @@ import (
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
-	importer "github.com/ipfs/go-ipfs/importer"
-	"github.com/ipfs/go-ipfs/importer/chunk"
 	peer "github.com/ipfs/go-ipfs/p2p/peer"
-	pin "github.com/ipfs/go-ipfs/pin"
 	fsrepo "github.com/ipfs/go-ipfs/repo/fsrepo"
 	"github.com/pivotal-golang/bytefmt"
 	"golang.org/x/crypto/openpgp"
@@ -43,23 +40,11 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	//"syscall"
 	"time"
-	//"github.com/ipfs/go-ipfs/blocks"
-	dag "github.com/ipfs/go-ipfs/merkledag"
 
-	//ds "github.com/ipfs/go-ipfs/Godeps/_workspace/src/github.com/jbenet/go-datastore"
-	"github.com/ipfs/go-ipfs/Godeps/_workspace/src/github.com/jbenet/go-datastore/flatfs"
-	syncds "github.com/ipfs/go-ipfs/Godeps/_workspace/src/github.com/jbenet/go-datastore/sync"
-	bstore "github.com/ipfs/go-ipfs/blocks/blockstore"
-	bserv "github.com/ipfs/go-ipfs/blockservice"
-	offline "github.com/ipfs/go-ipfs/exchange/offline"
-
-	ft "github.com/ipfs/go-ipfs/unixfs"
 
 	"code.google.com/p/go.net/context"
 	"github.com/VividCortex/godaemon"
-	dagutils "github.com/ipfs/go-ipfs/merkledag/utils"
 	config "github.com/ipfs/go-ipfs/repo/config"
 )
 
@@ -111,27 +96,6 @@ func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.W
 
 }
 
-func NewFlatfsDagService(dspath string) dag.DAGService {
-	datastore, err := flatfs.New(dspath, 2)
-	if err != nil {
-		panic(err)
-	}
-
-	bs := bstore.NewBlockstore(syncds.MutexWrap(datastore))
-	bsrv := bserv.New(bs, offline.Exchange(bs))
-	return dag.NewDAGService(bsrv)
-}
-
-//var rootnode *dag.Node
-func newDirNode() *dag.Node {
-	return &dag.Node{Data: ft.FolderPBData()}
-	/*if rootnode == nil {
-		return &dag.Node{Data: ft.FolderPBData()}
-	} else {
-		return rootnode
-	}*/
-}
-
 func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mutex, wg *sync.WaitGroup, dspath string) {
 	list, err := corenet.Listen(n, "/pack/add")
 	if err != nil {
@@ -150,40 +114,17 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 
 		fmt.Printf("Connection from: %s\n", con.Conn().RemotePeer())
 
-		newdirnode := newDirNode()
-		e := dagutils.NewDagEditor(NewFlatfsDagService(dspath), newdirnode)
-
-		// wrap the connection in the serverContentReader so we can get our
-		// header
 		serverReader := &serverContentReader{r: con}
-		chnk, err := chunk.FromString(serverReader, "rabin")
-		if err != nil {
-			panic(err)
-		}
-
-		dagnode, err := importer.BuildDagFromReader(
-			n.DAG,
-			chnk,
-			importer.PinIndirectCB(n.Pinning.GetManual()),
-		)
 
 		fmt.Println("They are adding:", serverReader.Name())
-		err = e.InsertNodeAtPath(ctx, serverReader.Name(), dagnode, newDirNode)
+		key,err := coreunix.Add(n,serverReader)
 		if err != nil {
 			panic(err)
 		}
 
-		err = e.WriteOutputTo(n.DAG)
-		if err != nil {
-			panic(err)
-		}
 
-		key, err := dagnode.Key()
-		if err != nil {
-			panic(err)
-		}
-		fmt.Println("Added:", key.B58String())
-		entry := Entry{Timestamp: time.Now(), Size: serverReader.n - 120, Name: serverReader.Name(), Hash: key.B58String()}
+		fmt.Println("Added:", key)
+		entry := Entry{Timestamp: time.Now(), Size: serverReader.n - 120, Name: serverReader.Name(), Hash: key}
 
 		mtx.Lock()
 		index.Entries = append(index.Entries, &entry)
@@ -193,19 +134,6 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 		if err != nil {
 			panic(err)
 		}
-
-		rootnd := e.GetNode()
-
-		rnk, err := rootnd.Key()
-		if err != nil {
-			panic(err)
-		}
-		mp := n.Pinning.GetManual()
-		mp.RemovePinWithMode(rnk, pin.Indirect)
-		mp.PinWithMode(rnk, pin.Recursive)
-		n.Pinning.Flush()
-
-		fmt.Println("Pinned rn:", rnk)
 
 	}
 
@@ -916,8 +844,16 @@ func main() {
 	home := getHomeDir()
 	gpghomeDefault := getGpghomeDir(home)
 
+	dspath := ""
+	if runtime.GOOS == "windows" {
+		dspath = fmt.Sprintf("%s\\ipfsrepo", home)
+	} else {
+		dspath = fmt.Sprintf("%s/.ipfs", home)
+	}
+
+
 	var server, verbose, clientserver, spawnClientserver bool
-	var serverhash, add, dspath, gpghome, gpgpass string
+	var serverhash, add, gpghome, gpgpass string
 	var catarg, recipient string
 	var port int
 	flag.BoolVar(&verbose, "v", false, "Verbose")
@@ -925,15 +861,10 @@ func main() {
 	flag.StringVar(&gpghome, "g", gpghomeDefault, "GPG homedir.")
 	flag.StringVar(&gpgpass, "gpass", "", "GPG password. This is insecure and only used on Windows where reading from the terminal breaks.")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
+	flag.StringVar(&dspath, "d", dspath, "Default data path.")
 	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
 	flag.Parse()
-
-	if runtime.GOOS == "windows" {
-		dspath = fmt.Sprintf("%s\\ipfsrepo", home)
-	} else {
-		dspath = fmt.Sprintf("%s/.ipfs", home)
-	}
 
 	server = hasCmd("server")
 	if hasCmd("add") {
