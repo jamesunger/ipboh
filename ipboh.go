@@ -24,6 +24,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"bufio"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -178,7 +179,7 @@ func findKey(keyring openpgp.EntityList, name string) *openpgp.Entity {
 	return nil
 }
 
-func decryptOpenpgp(data []byte, gpghome string, pass []byte) ([]byte, error) {
+func decryptOpenpgp(data io.Reader, gpghome string, pass []byte) (io.Reader, error) {
 	privkeyfile, err := os.Open(fmt.Sprintf("%s%ssecring.gpg", gpghome, string(os.PathSeparator)))
 	if err != nil {
 		fmt.Println("Failed to open secring", err)
@@ -191,11 +192,13 @@ func decryptOpenpgp(data []byte, gpghome string, pass []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	reader := bytes.NewReader(data)
-	block, err := armor.Decode(reader)
+	//reader := bytes.NewReader(data)
+	block, err := armor.Decode(data)
 	if err != nil {
+		fmt.Println(err)
 		panic(err)
 	}
+
 
 	if len(pass) == 0 {
 		fmt.Fprintf(os.Stderr, "Password: ")
@@ -223,11 +226,13 @@ func decryptOpenpgp(data []byte, gpghome string, pass []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	plaintext, err := ioutil.ReadAll(md.UnverifiedBody)
-	if err != nil {
-		panic(err)
-	}
-	return plaintext, nil
+	return md.UnverifiedBody, nil
+
+	//plaintext, err := ioutil.ReadAll(md.UnverifiedBody)
+	//if err != nil {
+//		panic(err)
+//	}
+//	return plaintext, nil
 }
 
 func encryptOpenpgp(data io.Reader, recipient string, gpghome string) ([]byte, error) {
@@ -324,7 +329,7 @@ func (rdr *serverContentReader) Name() string {
 }
 
 func (rdr *serverContentReader) Read(p []byte) (int, error) {
-	fmt.Println("rdr.n", rdr.n)
+	//fmt.Println("rdr.n", rdr.n)
 	headerlength := 120
 	if rdr.n < headerlength {
 		rdr.namebytes = make([]byte, 120, 120)
@@ -756,29 +761,41 @@ func catContent(catarg string, gpghome string, gpgpass string, port int, serverh
 		panic(err)
 	}
 
-	bytes, err := ioutil.ReadAll(resp.Body)
+	bufr := bufio.NewReader(resp.Body)
+	ispgp := false
+
+	pbytes,err := bufr.Peek(40)
 	if err != nil {
+		fmt.Println("Failed to peek in byte stream", err)
 		panic(err)
 	}
 
-	ispgp := false
-	if len(bytes) >= 40 {
-		initialbytes := bytes[0:40]
-		if strings.Contains(string(initialbytes), "BEGIN PGP MESSAGE") {
-			ispgp = true
-		}
+	if strings.Contains(string(pbytes), "BEGIN PGP MESSAGE") {
+		ispgp = true
 	}
 
 	if ispgp {
 		//fmt.Println("orig", string(bytes))
-		bytes, err = decryptOpenpgp(bytes, gpghome, []byte(gpgpass))
+		rdr, err := decryptOpenpgp(bufr, gpghome, []byte(gpgpass))
 		if err != nil {
 			fmt.Println("Failed to decrypt:", err)
 			return
 		}
-	}
 
-	os.Stdout.Write(bytes)
+		_, err = io.Copy(os.Stdout, rdr)
+		if err != nil {
+			fmt.Println("Failed to write to stdout")
+			panic(err)
+		}
+
+	} else {
+
+		_, err = io.Copy(os.Stdout, bufr)
+		if err != nil {
+			fmt.Println("Failed to write to stdout")
+			panic(err)
+		}
+	}
 
 }
 
