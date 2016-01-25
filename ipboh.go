@@ -25,6 +25,7 @@ import (
 	"flag"
 	"fmt"
 	"bufio"
+	"net/url"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -193,6 +194,9 @@ func decryptOpenpgp(data io.Reader, gpghome string, pass []byte) (io.Reader, err
 	}
 
 	//reader := bytes.NewReader(data)
+	//brk,_ := ioutil.ReadAll(data)
+	//fmt.Println("wtf",string(brk))
+	//fmt.Println("here is where eof panic")
 	block, err := armor.Decode(data)
 	if err != nil {
 		fmt.Println(err)
@@ -512,7 +516,8 @@ func getUpdateConfig(serverhash string, port int) (string, int) {
 
 }
 
-func startClientServer(ctx context.Context, n *core.IpfsNode, port int, defsrvhash string) {
+func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, defsrvhash string) {
+
 
 	//resettime := 60*time.Second
 	resettime := 1800 * time.Second
@@ -557,7 +562,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int, defsrvha
 		} else {
 
 			seen := make(map[string]bool)
-			hidelist := getHideList(targethash, port, entrylist)
+			hidelist := getHideList(targethash, baseurl, entrylist)
 
 			fmt.Fprintln(w,"<html><body><p><a href=\"/?verbose=true\">(verbose list)</a></p><p><pre><ul style=\"list-style: none;\">")
 			for i := len(entrylist.Entries) - 1; i >= 0; i-- {
@@ -662,15 +667,23 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, port int, defsrvha
 
 	})
 
-	httpd := &http.Server{
-		Addr: fmt.Sprintf("%s:%d", "127.0.0.1", port),
+	urlp,err := url.Parse(baseurl)
+	if err != nil {
+		panic(urlp)
 	}
-	httpd.ListenAndServe()
+	httpd := &http.Server{
+		Addr: urlp.Host,
+	}
+	err = httpd.ListenAndServe()
+	if err != nil {
+		fmt.Println("Failed to start client server on", baseurl,":",err)
+	}
+
 }
 
-func waitForClientserver(count int, port int) error {
+func waitForClientserver(count int, baseurl string) error {
 	for i := 0; i <= count; i++ {
-		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/areuthere", port))
+		resp, err := http.Get(fmt.Sprintf("%s/areuthere", baseurl))
 		if err != nil {
 			time.Sleep(1 * time.Second)
 			continue
@@ -692,13 +705,13 @@ func hasHideList(entrylist *Index) bool {
 	return false
 }
 
-func getHideList(serverhash string, port int, entrylist *Index) map[string]bool {
+func getHideList(serverhash string, baseurl string, entrylist *Index) map[string]bool {
 	entries := make(map[string]bool)
 	if !hasHideList(entrylist) {
 		return entries
 	}
 
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s&target=%s", port, "hidelist", serverhash))
+	resp, err := http.Get(fmt.Sprintf("%s/cat?hash=%s&target=%s", baseurl, "hidelist", serverhash))
 	if err != nil {
 		panic(err)
 	}
@@ -712,8 +725,8 @@ func getHideList(serverhash string, port int, entrylist *Index) map[string]bool 
 	return entries
 }
 
-func listEntries(port int, serverhash string, verbose bool) {
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/ls?target=%s", port, serverhash))
+func listEntries(baseurl string, serverhash string, verbose bool) {
+	resp, err := http.Get(fmt.Sprintf("%s/ls?target=%s", baseurl, serverhash))
 	if err != nil {
 		panic(err)
 	}
@@ -731,7 +744,7 @@ func listEntries(port int, serverhash string, verbose bool) {
 	}
 
 	seen := make(map[string]bool)
-	hidelist := getHideList(serverhash, port, entrylist)
+	hidelist := getHideList(serverhash, baseurl, entrylist)
 
 	// reverse the list
 	for i := len(entrylist.Entries) - 1; i >= 0; i-- {
@@ -754,9 +767,9 @@ func listEntries(port int, serverhash string, verbose bool) {
 
 }
 
-func catContent(catarg string, gpghome string, gpgpass string, port int, serverhash string) {
+func catContent(catarg string, gpghome string, gpgpass string, baseurl string, serverhash string) {
 
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/cat?hash=%s&target=%s", port, catarg, serverhash))
+	resp, err := http.Get(fmt.Sprintf("%s/cat?hash=%s&target=%s", baseurl, catarg, serverhash))
 	if err != nil {
 		panic(err)
 	}
@@ -799,7 +812,7 @@ func catContent(catarg string, gpghome string, gpgpass string, port int, serverh
 
 }
 
-func addContent(add string, gpghome string, recipient string, port int, serverhash string) {
+func addContent(add string, gpghome string, recipient string, baseurl string, serverhash string) {
 
 	var encbytes []byte
 	var err error
@@ -815,7 +828,7 @@ func addContent(add string, gpghome string, recipient string, port int, serverha
 		buf := bytes.NewBuffer(encbytes)
 		newcontent.r = buf
 	}
-	resp, err := http.Post(fmt.Sprintf("http://localhost:%d/add?target=%s", port, serverhash), "application/json", newcontent)
+	resp, err := http.Post(fmt.Sprintf("%s/add?target=%s", baseurl, serverhash), "application/json", newcontent)
 
 	if err != nil {
 		panic(err)
@@ -897,6 +910,7 @@ func main() {
 
 	// grab or update configs
 	serverhash, port = getUpdateConfig(serverhash, port)
+	csBaseUrl := fmt.Sprintf("http://localhost:%d",port)
 
 	// 'phase 1' initial setup...
 	ctx, cancel := context.WithCancel(context.Background())
@@ -917,7 +931,7 @@ func main() {
 			panic(err)
 		}
 	} else {
-		resp, err := http.Get(fmt.Sprintf("http://localhost:%d/areuthere", port))
+		resp, err := http.Get(fmt.Sprintf("%s/areuthere", csBaseUrl))
 		if err != nil {
 			spawnClientserver = true
 		} else if resp.StatusCode == 200 {
@@ -959,7 +973,7 @@ func main() {
 	// start client server
 	} else if clientserver {
 
-		startClientServer(ctx, n, port, serverhash)
+		startClientServer(ctx, n, csBaseUrl, serverhash)
 
 	// run client command
 	} else {
@@ -967,7 +981,7 @@ func main() {
 
 		if spawnClientserver {
 			//fmt.Println("Sleeping for 10 seconds...\n")
-			err := waitForClientserver(20, port)
+			err := waitForClientserver(20, csBaseUrl)
 			if err != nil {
 				panic(err)
 			}
@@ -981,15 +995,15 @@ func main() {
 
 		// add something
 		if add != "" {
-			addContent(add, gpghome, recipient, port, serverhash)
+			addContent(add, gpghome, recipient, csBaseUrl, serverhash)
 
 		// cat something
 		} else if catarg != "" {
-			catContent(catarg, gpghome, gpgpass, port, serverhash)
+			catContent(catarg, gpghome, gpgpass, csBaseUrl, serverhash)
 
 		// fetch entry list by default
 		} else {
-			listEntries(port, serverhash, verbose)
+			listEntries(csBaseUrl, serverhash, verbose)
 
 		}
 	}
