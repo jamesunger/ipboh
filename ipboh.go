@@ -576,7 +576,7 @@ func clientHandlerAdd(w http.ResponseWriter, rdr io.Reader, n *core.IpfsNode, ta
 	}
 
 
-	fmt.Println("Dialing...", targethash)
+	//fmt.Println("Dialing...", targethash)
 	con, err := corenet.Dial(n, target, "/pack/add")
 	if err != nil {
 		fmt.Println(err)
@@ -888,12 +888,11 @@ func startupIPFS(dspath string, ctx *context.Context) (*core.IpfsNode, error) {
 
 }
 
-func main() {
 
+func basicInit() (string,string,string,sync.WaitGroup) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	index := makeIndex()
 	home := getHomeDir()
 	gpghomeDefault := getGpghomeDir(home)
 
@@ -904,21 +903,12 @@ func main() {
 		dspath = fmt.Sprintf("%s/.ipfs", home)
 	}
 
+	return dspath,home,gpghomeDefault,wg
+}
 
-	var server, verbose, clientserver, spawnClientserver bool
-	var serverhash, add, gpghome, gpgpass string
-	var catarg, recipient string
-	var port int
-	flag.BoolVar(&verbose, "v", false, "Verbose")
-	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
-	flag.StringVar(&gpghome, "g", gpghomeDefault, "GPG homedir.")
-	flag.StringVar(&gpgpass, "gpass", "", "GPG password. This is insecure and only used on Windows where reading from the terminal breaks.")
-	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
-	flag.StringVar(&dspath, "d", dspath, "Default data path.")
-	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
-	flag.BoolVar(&clientserver, "c", false, "Start client server")
-	flag.Parse()
-
+func parseCommandFromArgs() (bool,string,string) {
+	var server bool
+	var add, catarg string
 	server = hasCmd("server")
 	if hasCmd("add") {
 		add = getCmdArg("add")
@@ -928,6 +918,12 @@ func main() {
 		catarg = getCmdArg("cat")
 	}
 
+	return server, add, catarg
+}
+
+// setup initial things, spawn server if needed, any prereqs
+func phase1Setup(ctx context.Context, server, spawnClientserver, clientserver bool, dspath string, home, serverhash string, port int) (*core.IpfsNode, string, int, string, bool) {
+
 	var n *core.IpfsNode
 	var err error
 
@@ -935,10 +931,6 @@ func main() {
 	filepath := fmt.Sprintf("%s%s.ipbohrc", home, string(os.PathSeparator))
 	serverhash, port = getUpdateConfig(filepath, serverhash, port)
 	csBaseUrl := fmt.Sprintf("http://localhost:%d",port)
-
-	// 'phase 1' initial setup...
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	if server {
 		n, err = startupIPFS(dspath, &ctx)
@@ -983,53 +975,85 @@ func main() {
 		}
 	}
 
+	return n,serverhash,port,csBaseUrl,spawnClientserver
+}
+
+func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.WaitGroup) {
+	index := loadIndex(dspath)
+	mtx := sync.Mutex{}
+
+	go handleIndex(n, ctx, index, wg)
+	go handleAdd(n, ctx, index, &mtx, wg, dspath)
+	wg.Wait()
+}
+
+func processClientCommands(ctx context.Context, n *core.IpfsNode, spawnClientserver bool, serverhash string, add,catarg,gpghome,gpgpass,recipient string, verbose bool, csBaseUrl string) {
+	if spawnClientserver {
+		//fmt.Println("Sleeping for 10 seconds...\n")
+		err := waitForClientserver(20, csBaseUrl)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	if serverhash == "" {
+		fmt.Println("Need to specify a remote server node id e.g. -h QmarTZGZDhBpDY5wgx9qSJrFcNokF37iD44Vk2FTYGPyBs")
+		return
+	}
+
+
+	// add something
+	if add != "" {
+		addContent(add, gpghome, recipient, csBaseUrl, serverhash)
+
+	// cat something
+	} else if catarg != "" {
+		catContent(catarg, gpghome, gpgpass, csBaseUrl, serverhash)
+
+	// fetch entry list by default
+	} else {
+		listEntries(csBaseUrl, serverhash, verbose)
+
+	}
+}
+
+func main() {
+
+
+	dspath, home, gpghomeDefault,wg := basicInit()
+
+	var server, verbose, clientserver, spawnClientserver bool
+	var serverhash, add, gpghome, gpgpass string
+	var catarg, recipient string
+	var port int
+	flag.BoolVar(&verbose, "v", false, "Verbose")
+	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
+	flag.StringVar(&gpghome, "g", gpghomeDefault, "GPG homedir.")
+	flag.StringVar(&gpgpass, "gpass", "", "GPG password. This is insecure and only used on Windows where reading from the terminal breaks.")
+	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
+	flag.StringVar(&dspath, "d", dspath, "Default data path.")
+	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
+	flag.BoolVar(&clientserver, "c", false, "Start client server")
+	flag.Parse()
+
+	server, add, catarg = parseCommandFromArgs()
+
+	// 'phase 1' initial setup...
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	n,serverhash,port,csBaseUrl,spawnClientserver := phase1Setup(ctx,server,spawnClientserver,clientserver,dspath,home,serverhash,port)
+
+
 	// 'phase 2' do the things
 	// startup the server if that is what we are doing
 	if server {
-
-		index = loadIndex(dspath)
-		mtx := sync.Mutex{}
-
-		go handleIndex(n, ctx, index, &wg)
-		go handleAdd(n, ctx, index, &mtx, &wg, dspath)
-		wg.Wait()
-
+		startServer(ctx,n,dspath,&wg)
 	// start client server
 	} else if clientserver {
-
 		startClientServer(ctx, n, csBaseUrl, serverhash)
-
 	// run client command
 	} else {
-
-
-		if spawnClientserver {
-			//fmt.Println("Sleeping for 10 seconds...\n")
-			err := waitForClientserver(20, csBaseUrl)
-			if err != nil {
-				panic(err)
-			}
-		}
-
-		if serverhash == "" {
-			fmt.Println("Need to specify a remote server node id e.g. -h QmarTZGZDhBpDY5wgx9qSJrFcNokF37iD44Vk2FTYGPyBs")
-			return
-		}
-
-
-		// add something
-		if add != "" {
-			addContent(add, gpghome, recipient, csBaseUrl, serverhash)
-
-		// cat something
-		} else if catarg != "" {
-			catContent(catarg, gpghome, gpgpass, csBaseUrl, serverhash)
-
-		// fetch entry list by default
-		} else {
-			listEntries(csBaseUrl, serverhash, verbose)
-
-		}
+		processClientCommands(ctx,n,spawnClientserver,serverhash,add,catarg,gpghome,gpgpass,recipient,verbose,csBaseUrl)
 	}
 
 }
