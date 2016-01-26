@@ -491,11 +491,8 @@ func getGpghomeDir(home string) string {
 	return gpgdir
 }
 
-func getUpdateConfig(serverhash string, port int) (string, int) {
+func getUpdateConfig(filepath string, serverhash string, port int) (string, int) {
 
-	home := getHomeDir()
-
-	filepath := fmt.Sprintf("%s%s.ipbohrc", home, string(os.PathSeparator))
 	ipbohconfig := readIpbohConfig(filepath)
 
 	if ipbohconfig.Port == 0 {
@@ -514,6 +511,118 @@ func getUpdateConfig(serverhash string, port int) (string, int) {
 
 	return ipbohconfig.Serverhash, ipbohconfig.Port
 
+}
+
+func clientHandlerCat(ctx context.Context, w http.ResponseWriter, n *core.IpfsNode, hash, targethash string) {
+	target, err := peer.IDB58Decode(targethash)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("%s", err), 500)
+	}
+
+	// FIXME: validate this in case there is a 46 len name!
+	foundhash := false
+	w.Header().Set("Content-Disposition", fmt.Sprintf("filename=\"%s\"",hash))
+	if len(hash) != 46 {
+		entrylist := getEntryList(n, target)
+		//fmt.Println(entrylist)
+		for i := len(entrylist.Entries) - 1; i >= 0; i-- {
+			if entrylist.Entries[i].Name == hash {
+				hash = entrylist.Entries[i].Hash
+				foundhash = true
+				break
+			}
+		}
+	} else {
+		foundhash = true
+	}
+
+	if !foundhash {
+		http.Error(w, "No entry found.", 500)
+		return
+	}
+
+	reader, err := coreunix.Cat(ctx, n, hash)
+	if err != nil {
+		panic(err)
+	}
+
+	_, err = io.Copy(w, reader)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error reading or writing entry:", err), 500)
+		return
+	}
+}
+
+func clientHandlerLs(w http.ResponseWriter, n *core.IpfsNode, targethash string) {
+	target, err := peer.IDB58Decode(targethash)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("%s", err), 500)
+	}
+
+	entrylist := getEntryList(n, target)
+	elbytes, err := json.Marshal(entrylist)
+	//fmt.Println("ls request sending ", string(elbytes))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error marshaling json:", err), 500)
+		return
+	}
+	w.Write(elbytes)
+}
+
+func clientHandlerAdd(w http.ResponseWriter, rdr io.Reader, n *core.IpfsNode, targethash string) {
+	target, err := peer.IDB58Decode(targethash)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("%s", err), 500)
+	}
+
+
+	fmt.Println("Dialing...", targethash)
+	con, err := corenet.Dial(n, target, "/pack/add")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer con.Close()
+
+	_, err = io.Copy(con, rdr)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error adding file:", err), 500)
+		return
+	}
+}
+
+func clientHandlerIndex(w http.ResponseWriter, ctx context.Context, n *core.IpfsNode, baseurl, targethash string, verbose bool) {
+	target, err := peer.IDB58Decode(targethash)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("%s", err), 500)
+	}
+
+	entrylist := getEntryList(n, target)
+
+	if verbose {
+		fmt.Fprintln(w,"<html><body><p><a href=\"/\">(default list)</a></p><p><pre><ul style=\"list-style: none;\">")
+		for i := len(entrylist.Entries) - 1; i >= 0; i-- {
+			ts := entrylist.Entries[i].Timestamp.Format("2006-01-02T15:04")
+			fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> %s %s <a href=\"/cat?hash=%s&target=%s\">%s</a></li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash,ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)), entrylist.Entries[i].Name, targethash, entrylist.Entries[i].Name)
+		}
+		fmt.Fprintln(w,"</ul></pre></p></body></html>")
+	} else {
+
+		seen := make(map[string]bool)
+		hidelist := getHideList(targethash, baseurl, entrylist)
+
+		fmt.Fprintln(w,"<html><body><p><a href=\"/?verbose=true\">(verbose list)</a></p><p><pre><ul style=\"list-style: none;\">")
+		for i := len(entrylist.Entries) - 1; i >= 0; i-- {
+			_, exists := seen[entrylist.Entries[i].Name]
+			_, existsh := hidelist[entrylist.Entries[i].Name]
+			if !exists && !existsh {
+				fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> <a href=\"/cat?hash=%s&target=%s\">%s</a></li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash, entrylist.Entries[i].Name, targethash, entrylist.Entries[i].Name)
+			}
+			seen[entrylist.Entries[i].Name] = true
+		}
+		fmt.Fprintln(w,"</ul></pre></p></body></html>")
+	}
+	return
 }
 
 func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, defsrvhash string) {
@@ -546,59 +655,18 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 		}
 		_,verbose := r.Form["verbose"]
 
-		target, err := peer.IDB58Decode(targethash)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("%s", err), 500)
-		}
-		entrylist := getEntryList(n, target)
+		clientHandlerIndex(w, ctx, n, baseurl, targethash, verbose)
 
-		if verbose {
-			fmt.Fprintln(w,"<html><body><p><a href=\"/\">(default list)</a></p><p><pre><ul style=\"list-style: none;\">")
-			for i := len(entrylist.Entries) - 1; i >= 0; i-- {
-				ts := entrylist.Entries[i].Timestamp.Format("2006-01-02T15:04")
-				fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> %s %s <a href=\"/cat?hash=%s&target=%s\">%s</a></li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash,ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)), entrylist.Entries[i].Name, targethash, entrylist.Entries[i].Name)
-			}
-			fmt.Fprintln(w,"</ul></pre></p></body></html>")
-		} else {
-
-			seen := make(map[string]bool)
-			hidelist := getHideList(targethash, baseurl, entrylist)
-
-			fmt.Fprintln(w,"<html><body><p><a href=\"/?verbose=true\">(verbose list)</a></p><p><pre><ul style=\"list-style: none;\">")
-			for i := len(entrylist.Entries) - 1; i >= 0; i-- {
-				_, exists := seen[entrylist.Entries[i].Name]
-				_, existsh := hidelist[entrylist.Entries[i].Name]
-				if !exists && !existsh {
-					fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> <a href=\"/cat?hash=%s&target=%s\">%s</a></li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash, entrylist.Entries[i].Name, targethash, entrylist.Entries[i].Name)
-				}
-				seen[entrylist.Entries[i].Name] = true
-			}
-			fmt.Fprintln(w,"</ul></pre></p></body></html>")
-		}
-		return
 	})
 
 	http.HandleFunc("/add", func(w http.ResponseWriter, r *http.Request) {
 		timer.Reset(resettime)
 		r.ParseForm()
 		targethash := r.Form["target"][0]
-		target, err := peer.IDB58Decode(targethash)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("%s", err), 500)
-		}
 
-		con, err := corenet.Dial(n, target, "/pack/add")
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		defer con.Close()
 
-		_, err = io.Copy(con, r.Body)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error adding file:", err), 500)
-			return
-		}
+		clientHandlerAdd(w, r.Body, n, targethash)
+
 
 	})
 
@@ -606,19 +674,9 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 		timer.Reset(resettime)
 		r.ParseForm()
 		targethash := r.Form["target"][0]
-		target, err := peer.IDB58Decode(targethash)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("%s", err), 500)
-		}
 
-		entrylist := getEntryList(n, target)
-		elbytes, err := json.Marshal(entrylist)
-		//fmt.Println("ls request sending ", string(elbytes))
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error marshaling json:", err), 500)
-			return
-		}
-		w.Write(elbytes)
+		clientHandlerLs(w, n, targethash)
+
 	})
 
 	http.HandleFunc("/cat", func(w http.ResponseWriter, r *http.Request) {
@@ -626,43 +684,8 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 		r.ParseForm()
 		hash := r.Form["hash"][0]
 		targethash := r.Form["target"][0]
-		target, err := peer.IDB58Decode(targethash)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("%s", err), 500)
-		}
 
-		// FIXME: validate this in case there is a 46 len name!
-		foundhash := false
-		w.Header().Set("Content-Disposition", fmt.Sprintf("filename=\"%s\"",hash))
-		if len(hash) != 46 {
-			entrylist := getEntryList(n, target)
-			//fmt.Println(entrylist)
-			for i := len(entrylist.Entries) - 1; i >= 0; i-- {
-				if entrylist.Entries[i].Name == hash {
-					hash = entrylist.Entries[i].Hash
-					foundhash = true
-					break
-				}
-			}
-		} else {
-			foundhash = true
-		}
-
-		if !foundhash {
-			http.Error(w, "No entry found.", 500)
-			return
-		}
-
-		reader, err := coreunix.Cat(ctx, n, hash)
-		if err != nil {
-			panic(err)
-		}
-
-		_, err = io.Copy(w, reader)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Error reading or writing entry:", err), 500)
-			return
-		}
+		clientHandlerCat(ctx, w, n, hash, targethash)
 
 
 	})
@@ -909,7 +932,8 @@ func main() {
 	var err error
 
 	// grab or update configs
-	serverhash, port = getUpdateConfig(serverhash, port)
+	filepath := fmt.Sprintf("%s%s.ipbohrc", home, string(os.PathSeparator))
+	serverhash, port = getUpdateConfig(filepath, serverhash, port)
 	csBaseUrl := fmt.Sprintf("http://localhost:%d",port)
 
 	// 'phase 1' initial setup...
