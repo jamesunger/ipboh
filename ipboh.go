@@ -19,13 +19,12 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"bufio"
-	"net/url"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -38,12 +37,12 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
-
 
 	"code.google.com/p/go.net/context"
 	"github.com/VividCortex/godaemon"
@@ -119,11 +118,10 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 		serverReader := &serverContentReader{r: con}
 
 		fmt.Println("They are adding:", serverReader.Name())
-		key,err := coreunix.Add(n,serverReader)
+		key, err := coreunix.Add(n, serverReader)
 		if err != nil {
 			panic(err)
 		}
-
 
 		fmt.Println("Added:", key)
 		entry := Entry{Timestamp: time.Now(), Size: serverReader.n - 120, Name: serverReader.Name(), Hash: key}
@@ -203,7 +201,6 @@ func decryptOpenpgp(data io.Reader, gpghome string, pass []byte) (io.Reader, err
 		panic(err)
 	}
 
-
 	if len(pass) == 0 {
 		fmt.Fprintf(os.Stderr, "Password: ")
 		pass, err = terminal.ReadPassword(0)
@@ -234,9 +231,9 @@ func decryptOpenpgp(data io.Reader, gpghome string, pass []byte) (io.Reader, err
 
 	//plaintext, err := ioutil.ReadAll(md.UnverifiedBody)
 	//if err != nil {
-//		panic(err)
-//	}
-//	return plaintext, nil
+	//		panic(err)
+	//	}
+	//	return plaintext, nil
 }
 
 func encryptOpenpgp(data io.Reader, recipient string, gpghome string) ([]byte, error) {
@@ -521,7 +518,7 @@ func clientHandlerCat(ctx context.Context, w http.ResponseWriter, n *core.IpfsNo
 
 	// FIXME: validate this in case there is a 46 len name!
 	foundhash := false
-	w.Header().Set("Content-Disposition", fmt.Sprintf("filename=\"%s\"",hash))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("filename=\"%s\"", hash))
 	if len(hash) != 46 {
 		entrylist := getEntryList(n, target)
 		//fmt.Println(entrylist)
@@ -575,7 +572,6 @@ func clientHandlerAdd(w http.ResponseWriter, rdr io.Reader, n *core.IpfsNode, ta
 		http.Error(w, fmt.Sprintf("%s", err), 500)
 	}
 
-
 	//fmt.Println("Dialing...", targethash)
 	con, err := corenet.Dial(n, target, "/pack/add")
 	if err != nil {
@@ -600,18 +596,18 @@ func clientHandlerIndex(w http.ResponseWriter, ctx context.Context, n *core.Ipfs
 	entrylist := getEntryList(n, target)
 
 	if verbose {
-		fmt.Fprintln(w,"<html><body><p><a href=\"/\">(default list)</a></p><p><pre><ul style=\"list-style: none;\">")
+		fmt.Fprintln(w, "<html><body><p><a href=\"/\">(default list)</a></p><p><pre><ul style=\"list-style: none;\">")
 		for i := len(entrylist.Entries) - 1; i >= 0; i-- {
 			ts := entrylist.Entries[i].Timestamp.Format("2006-01-02T15:04")
-			fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> %s %s <a href=\"/cat?hash=%s&target=%s\">%s</a></li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash,ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)), entrylist.Entries[i].Name, targethash, entrylist.Entries[i].Name)
+			fmt.Fprintf(w, "<li><a href=\"/cat?hash=%s&target=%s\">%s</a> %s %s <a href=\"/cat?hash=%s&target=%s\">%s</a></li>", entrylist.Entries[i].Hash, targethash, entrylist.Entries[i].Hash, ts, bytefmt.ByteSize(uint64(entrylist.Entries[i].Size)), entrylist.Entries[i].Name, targethash, entrylist.Entries[i].Name)
 		}
-		fmt.Fprintln(w,"</ul></pre></p></body></html>")
+		fmt.Fprintln(w, "</ul></pre></p></body></html>")
 	} else {
 
 		seen := make(map[string]bool)
 		hidelist := getHideList(targethash, baseurl, entrylist)
 
-		fmt.Fprintln(w,"<html><body><p><a href=\"/?verbose=true\">(verbose list)</a></p><p><pre><ul style=\"list-style: none;\">")
+		fmt.Fprintln(w, "<html><body><p><a href=\"/?verbose=true\">(verbose list)</a></p><p><pre><ul style=\"list-style: none;\">")
 		for i := len(entrylist.Entries) - 1; i >= 0; i-- {
 			_, exists := seen[entrylist.Entries[i].Name]
 			_, existsh := hidelist[entrylist.Entries[i].Name]
@@ -620,13 +616,12 @@ func clientHandlerIndex(w http.ResponseWriter, ctx context.Context, n *core.Ipfs
 			}
 			seen[entrylist.Entries[i].Name] = true
 		}
-		fmt.Fprintln(w,"</ul></pre></p></body></html>")
+		fmt.Fprintln(w, "</ul></pre></p></body></html>")
 	}
 	return
 }
 
 func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, defsrvhash string) {
-
 
 	//resettime := 60*time.Second
 	resettime := 1800 * time.Second
@@ -646,14 +641,14 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 		timer.Reset(resettime)
 		r.ParseForm()
 		var targethash string
-		ar,e := r.Form["target"]
+		ar, e := r.Form["target"]
 
 		if !e {
 			targethash = defsrvhash
 		} else {
 			targethash = ar[0]
 		}
-		_,verbose := r.Form["verbose"]
+		_, verbose := r.Form["verbose"]
 
 		clientHandlerIndex(w, ctx, n, baseurl, targethash, verbose)
 
@@ -664,9 +659,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 		r.ParseForm()
 		targethash := r.Form["target"][0]
 
-
 		clientHandlerAdd(w, r.Body, n, targethash)
-
 
 	})
 
@@ -687,10 +680,9 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 
 		clientHandlerCat(ctx, w, n, hash, targethash)
 
-
 	})
 
-	urlp,err := url.Parse(baseurl)
+	urlp, err := url.Parse(baseurl)
 	if err != nil {
 		panic(urlp)
 	}
@@ -699,7 +691,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 	}
 	err = httpd.ListenAndServe()
 	if err != nil {
-		fmt.Println("Failed to start client server on", baseurl,":",err)
+		fmt.Println("Failed to start client server on", baseurl, ":", err)
 	}
 
 }
@@ -800,7 +792,7 @@ func catContent(catarg string, gpghome string, gpgpass string, baseurl string, s
 	bufr := bufio.NewReader(resp.Body)
 	ispgp := false
 
-	pbytes,err := bufr.Peek(40)
+	pbytes, err := bufr.Peek(40)
 	if err != nil {
 		fmt.Println("Failed to peek in byte stream", err)
 		panic(err)
@@ -864,32 +856,29 @@ func startupIPFS(dspath string, ctx *context.Context) (*core.IpfsNode, error) {
 	if err != nil {
 		config, err := config.Init(os.Stdout, 2048)
 		if err != nil {
-			return nil,err
+			return nil, err
 		}
 
 		if err := fsrepo.Init(dspath, config); err != nil {
-			return nil,err
+			return nil, err
 		}
 
 		r, err = fsrepo.Open(dspath)
 		if err != nil {
-			return nil,err
+			return nil, err
 		}
 	}
 
-
 	node, err := core.NewNode(*ctx, &core.BuildCfg{Online: true, Repo: r})
 	if err != nil {
-		return nil,err
+		return nil, err
 	}
-
 
 	return node, nil
 
 }
 
-
-func basicInit() (string,string,string,sync.WaitGroup) {
+func basicInit() (string, string, string, sync.WaitGroup) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -903,10 +892,10 @@ func basicInit() (string,string,string,sync.WaitGroup) {
 		dspath = fmt.Sprintf("%s/.ipfs", home)
 	}
 
-	return dspath,home,gpghomeDefault,wg
+	return dspath, home, gpghomeDefault, wg
 }
 
-func parseCommandFromArgs() (bool,string,string) {
+func parseCommandFromArgs() (bool, string, string) {
 	var server bool
 	var add, catarg string
 	server = hasCmd("server")
@@ -930,7 +919,7 @@ func phase1Setup(ctx context.Context, server, spawnClientserver, clientserver bo
 	// grab or update configs
 	filepath := fmt.Sprintf("%s%s.ipbohrc", home, string(os.PathSeparator))
 	serverhash, port = getUpdateConfig(filepath, serverhash, port)
-	csBaseUrl := fmt.Sprintf("http://localhost:%d",port)
+	csBaseUrl := fmt.Sprintf("http://localhost:%d", port)
 
 	if server {
 		n, err = startupIPFS(dspath, &ctx)
@@ -975,7 +964,7 @@ func phase1Setup(ctx context.Context, server, spawnClientserver, clientserver bo
 		}
 	}
 
-	return n,serverhash,port,csBaseUrl,spawnClientserver
+	return n, serverhash, port, csBaseUrl, spawnClientserver
 }
 
 func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.WaitGroup) {
@@ -987,7 +976,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	wg.Wait()
 }
 
-func processClientCommands(ctx context.Context, n *core.IpfsNode, spawnClientserver bool, serverhash string, add,catarg,gpghome,gpgpass,recipient string, verbose bool, csBaseUrl string) {
+func processClientCommands(ctx context.Context, n *core.IpfsNode, spawnClientserver bool, serverhash string, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
 	if spawnClientserver {
 		//fmt.Println("Sleeping for 10 seconds...\n")
 		err := waitForClientserver(20, csBaseUrl)
@@ -1001,16 +990,15 @@ func processClientCommands(ctx context.Context, n *core.IpfsNode, spawnClientser
 		return
 	}
 
-
 	// add something
 	if add != "" {
 		addContent(add, gpghome, recipient, csBaseUrl, serverhash)
 
-	// cat something
+		// cat something
 	} else if catarg != "" {
 		catContent(catarg, gpghome, gpgpass, csBaseUrl, serverhash)
 
-	// fetch entry list by default
+		// fetch entry list by default
 	} else {
 		listEntries(csBaseUrl, serverhash, verbose)
 
@@ -1019,8 +1007,7 @@ func processClientCommands(ctx context.Context, n *core.IpfsNode, spawnClientser
 
 func main() {
 
-
-	dspath, home, gpghomeDefault,wg := basicInit()
+	dspath, home, gpghomeDefault, wg := basicInit()
 
 	var server, verbose, clientserver, spawnClientserver bool
 	var serverhash, add, gpghome, gpgpass string
@@ -1041,19 +1028,18 @@ func main() {
 	// 'phase 1' initial setup...
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	n,serverhash,port,csBaseUrl,spawnClientserver := phase1Setup(ctx,server,spawnClientserver,clientserver,dspath,home,serverhash,port)
-
+	n, serverhash, port, csBaseUrl, spawnClientserver := phase1Setup(ctx, server, spawnClientserver, clientserver, dspath, home, serverhash, port)
 
 	// 'phase 2' do the things
 	// startup the server if that is what we are doing
 	if server {
-		startServer(ctx,n,dspath,&wg)
-	// start client server
+		startServer(ctx, n, dspath, &wg)
+		// start client server
 	} else if clientserver {
 		startClientServer(ctx, n, csBaseUrl, serverhash)
-	// run client command
+		// run client command
 	} else {
-		processClientCommands(ctx,n,spawnClientserver,serverhash,add,catarg,gpghome,gpgpass,recipient,verbose,csBaseUrl)
+		processClientCommands(ctx, n, spawnClientserver, serverhash, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
 	}
 
 }
