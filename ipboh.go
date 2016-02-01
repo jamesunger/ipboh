@@ -49,6 +49,8 @@ import (
 	config "github.com/ipfs/go-ipfs/repo/config"
 )
 
+const HEADER_SIZE = 120
+
 type IpbohConfig struct {
 	Serverhash string
 	Port       int
@@ -124,7 +126,7 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 		}
 
 		fmt.Println("Added:", key)
-		entry := Entry{Timestamp: time.Now(), Size: serverReader.n - 120, Name: serverReader.Name(), Hash: key}
+		entry := Entry{Timestamp: time.Now(), Size: serverReader.n - HEADER_SIZE, Name: serverReader.Name(), Hash: key}
 
 		mtx.Lock()
 		index.Entries = append(index.Entries, &entry)
@@ -331,9 +333,9 @@ func (rdr *serverContentReader) Name() string {
 
 func (rdr *serverContentReader) Read(p []byte) (int, error) {
 	//fmt.Println("rdr.n", rdr.n)
-	headerlength := 120
+	headerlength := HEADER_SIZE
 	if rdr.n < headerlength {
-		rdr.namebytes = make([]byte, 120, 120)
+		rdr.namebytes = make([]byte, headerlength, headerlength)
 		blockLen, err := rdr.r.Read(rdr.namebytes)
 		if err != nil {
 			return blockLen, err
@@ -363,7 +365,7 @@ type clientContentReader struct {
 
 func (rdr *clientContentReader) Read(p []byte) (int, error) {
 
-	headerlength := 120
+	headerlength := HEADER_SIZE
 	if rdr.n < headerlength {
 		namebytes := []byte(rdr.name)
 		space := []byte(" ")
@@ -782,19 +784,24 @@ func listEntries(baseurl string, serverhash string, verbose bool) {
 
 }
 
-func catContent(catarg string, gpghome string, gpgpass string, baseurl string, serverhash string) {
+func catContent(catarg string, baseurl string, serverhash string) (rdr io.Reader) {
 
 	resp, err := http.Get(fmt.Sprintf("%s/cat?hash=%s&target=%s", baseurl, catarg, serverhash))
 	if err != nil {
 		panic(err)
 	}
 
-	bufr := bufio.NewReader(resp.Body)
+	return resp.Body
+
+}
+
+func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string) {
 	ispgp := false
 
+	//defer resp.Close()
+	bufr := bufio.NewReader(resp)
 	pbytes, err := bufr.Peek(40)
-	if err != nil {
-		fmt.Println("Failed to peek in byte stream", err)
+	if err != nil && fmt.Sprintf("%s",err) != "EOF" {
 		panic(err)
 	}
 
@@ -810,7 +817,7 @@ func catContent(catarg string, gpghome string, gpgpass string, baseurl string, s
 			return
 		}
 
-		_, err = io.Copy(os.Stdout, rdr)
+		_, err = io.Copy(wtr, rdr)
 		if err != nil {
 			fmt.Println("Failed to write to stdout")
 			panic(err)
@@ -818,7 +825,7 @@ func catContent(catarg string, gpghome string, gpgpass string, baseurl string, s
 
 	} else {
 
-		_, err = io.Copy(os.Stdout, bufr)
+		_, err = io.Copy(wtr, bufr)
 		if err != nil {
 			fmt.Println("Failed to write to stdout")
 			panic(err)
@@ -869,6 +876,7 @@ func startupIPFS(dspath string, ctx *context.Context) (*core.IpfsNode, error) {
 		}
 	}
 
+	//fmt.Println(r)
 	node, err := core.NewNode(*ctx, &core.BuildCfg{Online: true, Repo: r})
 	if err != nil {
 		return nil, err
@@ -976,7 +984,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	wg.Wait()
 }
 
-func processClientCommands(ctx context.Context, n *core.IpfsNode, spawnClientserver bool, serverhash string, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
+func processClientCommands(spawnClientserver bool, serverhash string, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
 	if spawnClientserver {
 		//fmt.Println("Sleeping for 10 seconds...\n")
 		err := waitForClientserver(20, csBaseUrl)
@@ -996,8 +1004,8 @@ func processClientCommands(ctx context.Context, n *core.IpfsNode, spawnClientser
 
 		// cat something
 	} else if catarg != "" {
-		catContent(catarg, gpghome, gpgpass, csBaseUrl, serverhash)
-
+		rdr := catContent(catarg, csBaseUrl, serverhash)
+		catCatContent(rdr,os.Stdout,gpghome,gpgpass)
 		// fetch entry list by default
 	} else {
 		listEntries(csBaseUrl, serverhash, verbose)
@@ -1039,7 +1047,7 @@ func main() {
 		startClientServer(ctx, n, csBaseUrl, serverhash)
 		// run client command
 	} else {
-		processClientCommands(ctx, n, spawnClientserver, serverhash, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
+		processClientCommands(spawnClientserver, serverhash, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
 	}
 
 }
