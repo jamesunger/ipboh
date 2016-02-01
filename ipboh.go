@@ -845,6 +845,11 @@ func addContent(add string, gpghome string, recipient string, baseurl string, se
 		}
 	}
 
+	sbytes := []byte(add)
+	if len(sbytes) > HEADER_SIZE {
+		panic(fmt.Sprintf("Name '%s' longer than %d",sbytes,HEADER_SIZE))
+	}
+
 	newcontent := &clientContentReader{name: add, r: os.Stdin}
 	if len(encbytes) != 0 {
 		buf := bytes.NewBuffer(encbytes)
