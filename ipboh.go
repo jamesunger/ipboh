@@ -72,9 +72,9 @@ func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.W
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("I have an index: %s\n", n.Identity)
 
 	for {
+		fmt.Printf("Waiting for index (ls) requests: %s\n", n.Identity)
 		con, err := list.Accept()
 		if err != nil {
 			fmt.Println(err)
@@ -119,7 +119,7 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 
 		serverReader := &serverContentReader{r: con}
 
-		fmt.Println("They are adding:", serverReader.Name())
+		fmt.Println("Add request:", serverReader.Name())
 		key, err := coreunix.Add(n, serverReader)
 		if err != nil {
 			panic(err)
@@ -814,7 +814,7 @@ func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string) {
 		rdr, err := decryptOpenpgp(bufr, gpghome, []byte(gpgpass))
 		if err != nil {
 			fmt.Println("Failed to decrypt:", err)
-			return
+			panic(err)
 		}
 
 		_, err = io.Copy(wtr, rdr)
