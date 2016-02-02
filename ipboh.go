@@ -44,7 +44,7 @@ import (
 	"sync"
 	"time"
 
-	"code.google.com/p/go.net/context"
+	"golang.org/x/net/context"
 	"github.com/VividCortex/godaemon"
 	config "github.com/ipfs/go-ipfs/repo/config"
 )
