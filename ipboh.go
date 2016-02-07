@@ -29,6 +29,7 @@ import (
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
 	peer "github.com/ipfs/go-ipfs/p2p/peer"
+	"github.com/ipfs/go-ipfs/blocks/key"
 	fsrepo "github.com/ipfs/go-ipfs/repo/fsrepo"
 	"github.com/pivotal-golang/bytefmt"
 	"golang.org/x/crypto/openpgp"
@@ -512,6 +513,19 @@ func getUpdateConfig(filepath string, serverhash string, port int) (string, int)
 
 }
 
+func pin(n *core.IpfsNode, ctx  context.Context, hash string) error {
+
+	hashkey := key.B58KeyDecode(hash)
+	node,err := n.DAG.Get(ctx,hashkey)
+	if err != nil {
+		return err
+	}
+
+	err = n.Pinning.Pin(ctx,node,false)
+	return err
+
+}
+
 func clientHandlerCat(ctx context.Context, w http.ResponseWriter, n *core.IpfsNode, hash, targethash string) {
 	target, err := peer.IDB58Decode(targethash)
 	if err != nil {
@@ -550,6 +564,40 @@ func clientHandlerCat(ctx context.Context, w http.ResponseWriter, n *core.IpfsNo
 		http.Error(w, fmt.Sprintf("Error reading or writing entry:", err), 500)
 		return
 	}
+}
+
+func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsNode, dspath string, targethash string) {
+	target, err := peer.IDB58Decode(targethash)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Fprintln(w,"Syncing from",target)
+	entrylist := getEntryList(n, target)
+
+	fmt.Fprintln(w,"Got entry list.")
+	for i := range entrylist.Entries {
+		fmt.Fprintln(w,"Fetching",entrylist.Entries[i].Name)
+		reader, err := coreunix.Cat(ctx, n, entrylist.Entries[i].Hash)
+		if err != nil {
+			panic(err)
+		}
+		ioutil.ReadAll(reader)
+		fmt.Fprintln(w,"Read",entrylist.Entries[i].Hash)
+		fmt.Fprintln(w,"Pinning",entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
+		err = pin(n, ctx, entrylist.Entries[i].Hash)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Fprintln(w,"Pinned",entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
+	}
+
+	fmt.Fprintln(w,"all set")
+	saveIndex(entrylist,dspath)
+	if err != nil {
+		panic(err)
+	}
+
 }
 
 func clientHandlerLs(w http.ResponseWriter, n *core.IpfsNode, targethash string) {
@@ -623,24 +671,24 @@ func clientHandlerIndex(w http.ResponseWriter, ctx context.Context, n *core.Ipfs
 	return
 }
 
-func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, defsrvhash string) {
+func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, defsrvhash string, dspath string, timeout time.Duration) {
 
-	//resettime := 60*time.Second
-	resettime := 1800 * time.Second
-	timer := time.NewTimer(resettime) // half hour
-	go func() {
-		<-timer.C
-		//fmt.Println("Timer expired")
-		os.Exit(0)
-	}()
+	timer := time.NewTimer(timeout)
+	if timeout != 0 {
+		go func() {
+			<-timer.C
+			fmt.Println("Timer expired")
+			os.Exit(0)
+		}()
+	}
 
 	http.HandleFunc("/areuthere", func(w http.ResponseWriter, r *http.Request) {
-		timer.Reset(resettime)
+		timer.Reset(timeout)
 		return
 	})
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		timer.Reset(resettime)
+		timer.Reset(timeout)
 		r.ParseForm()
 		var targethash string
 		ar, e := r.Form["target"]
@@ -657,7 +705,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 	})
 
 	http.HandleFunc("/add", func(w http.ResponseWriter, r *http.Request) {
-		timer.Reset(resettime)
+		timer.Reset(timeout)
 		r.ParseForm()
 		targethash := r.Form["target"][0]
 
@@ -665,8 +713,19 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 
 	})
 
+	http.HandleFunc("/sync", func(w http.ResponseWriter, r *http.Request) {
+		timer.Reset(timeout)
+		r.ParseForm()
+		targethash := r.Form["target"][0]
+
+		clientHandlerSync(w, ctx, n, dspath, targethash)
+
+	})
+
+
+
 	http.HandleFunc("/ls", func(w http.ResponseWriter, r *http.Request) {
-		timer.Reset(resettime)
+		timer.Reset(timeout)
 		r.ParseForm()
 		targethash := r.Form["target"][0]
 
@@ -675,7 +734,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 	})
 
 	http.HandleFunc("/cat", func(w http.ResponseWriter, r *http.Request) {
-		timer.Reset(resettime)
+		timer.Reset(timeout)
 		r.ParseForm()
 		hash := r.Form["hash"][0]
 		targethash := r.Form["target"][0]
@@ -784,6 +843,15 @@ func listEntries(baseurl string, serverhash string, verbose bool) {
 
 }
 
+func syncRemote(syncremote string, baseurl string, serverhash string) (rdr io.Reader) {
+	resp, err := http.Get(fmt.Sprintf("%s/sync?target=%s", baseurl, serverhash))
+	if err != nil {
+		panic(err)
+	}
+
+	return resp.Body
+}
+
 func catContent(catarg string, baseurl string, serverhash string) (rdr io.Reader) {
 
 	resp, err := http.Get(fmt.Sprintf("%s/cat?hash=%s&target=%s", baseurl, catarg, serverhash))
@@ -841,7 +909,7 @@ func addContent(add string, gpghome string, recipient string, baseurl string, se
 	if recipient != "" {
 		encbytes, err = encryptOpenpgp(os.Stdin, recipient, gpghome)
 		if err != nil {
-			fmt.Println("Failed to encrypt.")
+			panic("Failed to encrypt.")
 		}
 	}
 
@@ -908,19 +976,23 @@ func basicInit() (string, string, string, sync.WaitGroup) {
 	return dspath, home, gpghomeDefault, wg
 }
 
-func parseCommandFromArgs() (bool, string, string) {
+func parseCommandFromArgs() (bool, string, string, string) {
 	var server bool
-	var add, catarg string
+	var add, catarg, syncserver string
 	server = hasCmd("server")
 	if hasCmd("add") {
 		add = getCmdArg("add")
+	}
+
+	if hasCmd("sync") {
+		syncserver = getCmdArg("sync")
 	}
 
 	if hasCmd("cat") {
 		catarg = getCmdArg("cat")
 	}
 
-	return server, add, catarg
+	return server, syncserver, add, catarg
 }
 
 // setup initial things, spawn server if needed, any prereqs
@@ -989,7 +1061,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	wg.Wait()
 }
 
-func processClientCommands(spawnClientserver bool, serverhash string, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
+func processClientCommands(spawnClientserver bool, serverhash string, syncremote, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
 	if spawnClientserver {
 		//fmt.Println("Sleeping for 10 seconds...\n")
 		err := waitForClientserver(20, csBaseUrl)
@@ -1011,7 +1083,10 @@ func processClientCommands(spawnClientserver bool, serverhash string, add, catar
 	} else if catarg != "" {
 		rdr := catContent(catarg, csBaseUrl, serverhash)
 		catCatContent(rdr,os.Stdout,gpghome,gpgpass)
-		// fetch entry list by default
+	} else if syncremote != "" {
+		rdr := syncRemote(syncremote,csBaseUrl,serverhash)
+		io.Copy(os.Stdout, rdr)
+	// fetch entry list by default
 	} else {
 		listEntries(csBaseUrl, serverhash, verbose)
 
@@ -1024,8 +1099,8 @@ func main() {
 
 	var server, verbose, clientserver, spawnClientserver bool
 	var serverhash, add, gpghome, gpgpass string
-	var catarg, recipient string
-	var port int
+	var catarg, recipient, syncremote string
+	var port, timeout int
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
 	flag.StringVar(&gpghome, "g", gpghomeDefault, "GPG homedir.")
@@ -1034,11 +1109,13 @@ func main() {
 	flag.StringVar(&dspath, "d", dspath, "Default data path.")
 	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
+	flag.IntVar(&timeout, "t", 30, "Timeout of server if not used")
 	flag.Parse()
 
-	server, add, catarg = parseCommandFromArgs()
+	server, syncremote, add, catarg = parseCommandFromArgs()
 
 	// 'phase 1' initial setup...
+	//ctx, cancel := context.WithCancel(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	n, serverhash, port, csBaseUrl, spawnClientserver := phase1Setup(ctx, server, spawnClientserver, clientserver, dspath, home, serverhash, port)
@@ -1049,10 +1126,10 @@ func main() {
 		startServer(ctx, n, dspath, &wg)
 		// start client server
 	} else if clientserver {
-		startClientServer(ctx, n, csBaseUrl, serverhash)
+		startClientServer(ctx, n, csBaseUrl, serverhash, dspath, time.Duration(timeout) * time.Minute)
 		// run client command
 	} else {
-		processClientCommands(spawnClientserver, serverhash, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
+		processClientCommands(spawnClientserver, serverhash, syncremote, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
 	}
 
 }
