@@ -572,6 +572,18 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 		panic(err)
 	}
 
+	curentries := loadIndex(dspath)
+	entrymap := make(map[string]bool)
+	if len(curentries.Entries) != 0 {
+		for i := range curentries.Entries {
+			key := fmt.Sprintf("%v",curentries.Entries[i])
+			//fmt.Println(key)
+			//entrymap[curentries.Entries[i].Hash] = curentries.Entries[i]
+			entrymap[key] = true
+		}
+	}
+	fmt.Println("Cur entries",len(curentries.Entries))
+
 	fmt.Fprintln(w,"Syncing from",target)
 	entrylist := getEntryList(n, target)
 
@@ -583,6 +595,18 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 			panic(err)
 		}
 		ioutil.ReadAll(reader)
+
+		if len(curentries.Entries) != 0 {
+			_, ok := entrymap[fmt.Sprintf("%v",entrylist.Entries[i])]
+			if ok {
+				fmt.Fprintln(w,"Already have",entrylist.Entries[i].Hash)
+			} else {
+				fmt.Println("WTF")
+				fmt.Fprintln(w,"Appending",entrylist.Entries[i].Hash)
+				curentries.Entries = append(curentries.Entries, entrylist.Entries[i])
+			}
+		}
+
 		fmt.Fprintln(w,"Read",entrylist.Entries[i].Hash)
 		fmt.Fprintln(w,"Pinning",entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
 		err = pin(n, ctx, entrylist.Entries[i].Hash)
@@ -592,12 +616,16 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 		fmt.Fprintln(w,"Pinned",entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
 	}
 
+	if len(curentries.Entries) != 0 {
+		saveIndex(curentries,dspath)
+	} else {
+		saveIndex(entrylist,dspath)
+	}
+
 	fmt.Fprintln(w,"all set")
-	saveIndex(entrylist,dspath)
 	if err != nil {
 		panic(err)
 	}
-
 }
 
 func clientHandlerLs(w http.ResponseWriter, n *core.IpfsNode, targethash string) {
@@ -677,7 +705,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 	if timeout != 0 {
 		go func() {
 			<-timer.C
-			fmt.Println("Timer expired")
+			fmt.Println("ipboh clientserver idle timer expired")
 			os.Exit(0)
 		}()
 	}
