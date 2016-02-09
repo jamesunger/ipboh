@@ -112,7 +112,7 @@ func Test_basicInit(t *testing.T) {
 
 
 func Test_parseCommandFromArgs(t *testing.T) {
-	server,add,catarg := parseCommandFromArgs()
+	server,_,add,catarg := parseCommandFromArgs()
 	if server != false {
 		t.Fail()
 	}
@@ -323,7 +323,7 @@ func Test_startClientServer(t *testing.T) {
 		fmt.Println("target ipboh node is null, skipping.")
 		return
 	}
-	go startClientServer(globalctx,globalnode,"http://127.0.0.1:42334",testtarget)
+	go startClientServer(globalctx,globalnode,"http://127.0.0.1:42334",testtarget,"test",300*time.Second)
 	time.Sleep(1*time.Second)
 
 	resp,err := http.Get("http://127.0.0.1:42334/areuthere")
@@ -487,9 +487,9 @@ func Test_getGpghome(t *testing.T) {
 }
 
 func Test_processClientCommands(t *testing.T) {
-	processClientCommands(false,testtarget,"","","test","","",false,"http://127.0.0.1:42334")
-	processClientCommands(false,testtarget,"addstring","","test","","",false,"http://127.0.0.1:42334")
-	processClientCommands(false,testtarget,"","catarg","test","","",false,"http://127.0.0.1:42334")
+	processClientCommands(false,testtarget,"","","","test","","",false,"http://127.0.0.1:42334")
+	processClientCommands(false,testtarget,"","addstring","","test","","",false,"http://127.0.0.1:42334")
+	processClientCommands(false,testtarget,"","","catarg","test","","",false,"http://127.0.0.1:42334")
 }
 
 

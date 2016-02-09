@@ -28,7 +28,7 @@ import (
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
-	peer "github.com/ipfs/go-ipfs/p2p/peer"
+	peer "gx/ipfs/QmUBogf4nUefBjmYjn6jfsfPJRkmDGSeMhNj4usRKq69f4/go-libp2p/p2p/peer"
 	"github.com/ipfs/go-ipfs/blocks/key"
 	fsrepo "github.com/ipfs/go-ipfs/repo/fsrepo"
 	"github.com/pivotal-golang/bytefmt"
