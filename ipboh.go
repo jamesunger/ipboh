@@ -843,7 +843,7 @@ func listEntries(baseurl string, serverhash string, verbose bool) {
 
 }
 
-func syncRemote(syncremote string, baseurl string, serverhash string) (rdr io.Reader) {
+func syncRemote(baseurl string, serverhash string) (rdr io.Reader) {
 	resp, err := http.Get(fmt.Sprintf("%s/sync?target=%s", baseurl, serverhash))
 	if err != nil {
 		panic(err)
@@ -976,23 +976,20 @@ func basicInit() (string, string, string, sync.WaitGroup) {
 	return dspath, home, gpghomeDefault, wg
 }
 
-func parseCommandFromArgs() (bool, string, string, string) {
-	var server bool
-	var add, catarg, syncserver string
+func parseCommandFromArgs() (bool, bool, string, string) {
+	var server, syncremote bool
+	var add, catarg string
 	server = hasCmd("server")
+	syncremote = hasCmd("sync")
 	if hasCmd("add") {
 		add = getCmdArg("add")
-	}
-
-	if hasCmd("sync") {
-		syncserver = getCmdArg("sync")
 	}
 
 	if hasCmd("cat") {
 		catarg = getCmdArg("cat")
 	}
 
-	return server, syncserver, add, catarg
+	return server, syncremote, add, catarg
 }
 
 // setup initial things, spawn server if needed, any prereqs
@@ -1061,7 +1058,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	wg.Wait()
 }
 
-func processClientCommands(spawnClientserver bool, serverhash string, syncremote, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
+func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
 	if spawnClientserver {
 		//fmt.Println("Sleeping for 10 seconds...\n")
 		err := waitForClientserver(20, csBaseUrl)
@@ -1083,8 +1080,8 @@ func processClientCommands(spawnClientserver bool, serverhash string, syncremote
 	} else if catarg != "" {
 		rdr := catContent(catarg, csBaseUrl, serverhash)
 		catCatContent(rdr,os.Stdout,gpghome,gpgpass)
-	} else if syncremote != "" {
-		rdr := syncRemote(syncremote,csBaseUrl,serverhash)
+	} else if syncremote {
+		rdr := syncRemote(csBaseUrl,serverhash)
 		io.Copy(os.Stdout, rdr)
 	// fetch entry list by default
 	} else {
@@ -1097,9 +1094,9 @@ func main() {
 
 	dspath, home, gpghomeDefault, wg := basicInit()
 
-	var server, verbose, clientserver, spawnClientserver bool
+	var server, verbose, clientserver, spawnClientserver, syncremote bool
 	var serverhash, add, gpghome, gpgpass string
-	var catarg, recipient, syncremote string
+	var catarg, recipient string
 	var port, timeout int
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
