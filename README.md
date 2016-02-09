@@ -15,18 +15,11 @@ to random hosts and provides ready integration with the shell.
 Installation
 ------------
 ```
-$ go get github.com/jamesunger/ipboh
+git clone https://github.com/jamesunger/ipboh.git
+cd ipboh
+export GOPATH=$PWD
+make install
 ```
-
-If compiling on Windows or cross compiling for Windows, omit fuse and build
-directly after git clone:
-```
-$ export GOOS=windows
-$ go build -tags nofuse ipboh.go
-```
-
-ipboh should work on MacOS and Windows, but I've only tested Windows (and not
-very much).
 
 Example Usage
 -------

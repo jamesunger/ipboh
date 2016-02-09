@@ -1,0 +1,13 @@
+{
+  "name": "ipboh",
+  "version": "0.0.2",
+  "gxDependencies": [
+    {
+      "name": "go-libp2p",
+      "hash": "QmUBogf4nUefBjmYjn6jfsfPJRkmDGSeMhNj4usRKq69f4",
+      "version": "1.0.0"
+    }
+  ],
+  "language": "go",
+  "issues_url": "https://github.com/jamesunger/ipboh"
+}
