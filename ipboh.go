@@ -566,7 +566,7 @@ func clientHandlerCat(ctx context.Context, w http.ResponseWriter, n *core.IpfsNo
 	}
 }
 
-func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsNode, dspath string, targethash string) {
+func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsNode, dspath string, targethash string, reloadindex chan bool) {
 	target, err := peer.IDB58Decode(targethash)
 	if err != nil {
 		panic(err)
@@ -582,14 +582,12 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 			entrymap[key] = true
 		}
 	}
-	fmt.Println("Cur entries",len(curentries.Entries))
 
-	fmt.Fprintln(w,"Syncing from",target)
+	fmt.Fprintln(w,"Syncing...",target)
 	entrylist := getEntryList(n, target)
 
-	fmt.Fprintln(w,"Got entry list.")
 	for i := range entrylist.Entries {
-		fmt.Fprintln(w,"Fetching",entrylist.Entries[i].Name)
+		fmt.Fprintln(w,"Downloading ",entrylist.Entries[i].Name)
 		reader, err := coreunix.Cat(ctx, n, entrylist.Entries[i].Hash)
 		if err != nil {
 			panic(err)
@@ -601,14 +599,11 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 			if ok {
 				fmt.Fprintln(w,"Already have",entrylist.Entries[i].Hash)
 			} else {
-				fmt.Println("WTF")
 				fmt.Fprintln(w,"Appending",entrylist.Entries[i].Hash)
 				curentries.Entries = append(curentries.Entries, entrylist.Entries[i])
 			}
 		}
 
-		fmt.Fprintln(w,"Read",entrylist.Entries[i].Hash)
-		fmt.Fprintln(w,"Pinning",entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
 		err = pin(n, ctx, entrylist.Entries[i].Hash)
 		if err != nil {
 			panic(err)
@@ -622,10 +617,8 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 		saveIndex(entrylist,dspath)
 	}
 
-	fmt.Fprintln(w,"all set")
-	if err != nil {
-		panic(err)
-	}
+	fmt.Fprintln(w,"Sync complete.")
+	reloadindex <- true
 }
 
 func clientHandlerLs(w http.ResponseWriter, n *core.IpfsNode, targethash string) {
@@ -699,7 +692,7 @@ func clientHandlerIndex(w http.ResponseWriter, ctx context.Context, n *core.Ipfs
 	return
 }
 
-func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, defsrvhash string, dspath string, timeout time.Duration) {
+func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, defsrvhash string, dspath string, timeout time.Duration, reloadindex chan bool) {
 
 	timer := time.NewTimer(timeout)
 	if timeout != 0 {
@@ -746,7 +739,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 		r.ParseForm()
 		targethash := r.Form["target"][0]
 
-		clientHandlerSync(w, ctx, n, dspath, targethash)
+		clientHandlerSync(w, ctx, n, dspath, targethash, reloadindex)
 
 	})
 
@@ -1077,12 +1070,22 @@ func phase1Setup(ctx context.Context, server, spawnClientserver, clientserver bo
 	return n, serverhash, port, csBaseUrl, spawnClientserver
 }
 
-func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.WaitGroup) {
+func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.WaitGroup, baseurl string, reloadindex chan bool) {
 	index := loadIndex(dspath)
 	mtx := sync.Mutex{}
 
 	go handleIndex(n, ctx, index, wg)
 	go handleAdd(n, ctx, index, &mtx, wg, dspath)
+
+	go func() {
+		for {
+			<-reloadindex
+			fmt.Println("Need to reload index!")
+			index = loadIndex(dspath)
+		}
+	}()
+
+	startClientServer(ctx, n, baseurl, "", dspath, 0, reloadindex)
 	wg.Wait()
 }
 
@@ -1126,6 +1129,7 @@ func main() {
 	var serverhash, add, gpghome, gpgpass string
 	var catarg, recipient string
 	var port, timeout int
+
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
 	flag.StringVar(&gpghome, "g", gpghomeDefault, "GPG homedir.")
@@ -1139,6 +1143,8 @@ func main() {
 
 	server, syncremote, add, catarg = parseCommandFromArgs()
 
+	reloadindex := make(chan bool)
+
 	// 'phase 1' initial setup...
 	//ctx, cancel := context.WithCancel(context.Background())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1148,10 +1154,18 @@ func main() {
 	// 'phase 2' do the things
 	// startup the server if that is what we are doing
 	if server {
-		startServer(ctx, n, dspath, &wg)
+		startServer(ctx, n, dspath, &wg, csBaseUrl, reloadindex)
 		// start client server
 	} else if clientserver {
-		startClientServer(ctx, n, csBaseUrl, serverhash, dspath, time.Duration(timeout) * time.Minute)
+		go func() {
+			for {
+				// we don't care about actually reloading anything in client context so just make sure the channel clears
+				<-reloadindex
+			}
+		}()
+
+
+		startClientServer(ctx, n, csBaseUrl, serverhash, dspath, time.Duration(timeout) * time.Minute, reloadindex)
 		// run client command
 	} else {
 		processClientCommands(spawnClientserver, serverhash, syncremote, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
