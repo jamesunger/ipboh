@@ -1081,7 +1081,9 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 		for {
 			<-reloadindex
 			fmt.Println("Need to reload index!")
+			mtx.Lock()
 			index = loadIndex(dspath)
+			mtx.Unlock()
 		}
 	}()
 
