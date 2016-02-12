@@ -59,6 +59,8 @@ type IpbohConfig struct {
 
 type Index struct {
 	Entries []*Entry
+	WriteList []string
+	ReadList []string
 }
 
 type Entry struct {
@@ -68,7 +70,7 @@ type Entry struct {
 	Size      int
 }
 
-func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup) {
+func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup, getCurIndex func() *Index ) {
 	list, err := corenet.Listen(n, "/pack/index")
 	if err != nil {
 		panic(err)
@@ -83,7 +85,28 @@ func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.W
 		}
 		defer con.Close()
 
+		index = getCurIndex()
 		fmt.Printf("Connection from: %s\n", con.Conn().RemotePeer())
+		if len(index.ReadList) != 0 {
+			present := false
+			for i := range index.ReadList {
+				fmt.Println(index.ReadList[i])
+				if con.Conn().RemotePeer().Pretty() == index.ReadList[i] {
+					present = true
+					break
+				}
+			}
+
+			if !present {
+				fmt.Println("Not on read list", con.Conn().RemotePeer().Pretty())
+			} else {
+				fmt.Println("On read list", con.Conn().RemotePeer().Pretty())
+			}
+
+		}
+
+
+
 		indexbytes, err := json.Marshal(index)
 		if err != nil {
 			panic(err)
@@ -100,7 +123,7 @@ func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.W
 
 }
 
-func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mutex, wg *sync.WaitGroup, dspath string) {
+func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mutex, wg *sync.WaitGroup, dspath string, reloadindex chan bool, getCurIndex func() *Index) {
 	list, err := corenet.Listen(n, "/pack/add")
 	if err != nil {
 		panic(err)
@@ -116,7 +139,25 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 		}
 		defer con.Close()
 
+		index = getCurIndex()
 		fmt.Printf("Connection from: %s\n", con.Conn().RemotePeer())
+		if len(index.WriteList) != 0 {
+			present := false
+			for i := range index.WriteList {
+				if con.Conn().RemotePeer().Pretty() == index.WriteList[i] {
+					present = true
+					break
+				}
+			}
+
+			if !present {
+				fmt.Println("Not on write list", con.Conn().RemotePeer().Pretty())
+			} else {
+				fmt.Println("On write list", con.Conn().RemotePeer().Pretty())
+			}
+
+		}
+
 
 		serverReader := &serverContentReader{r: con}
 
@@ -131,12 +172,13 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 
 		mtx.Lock()
 		index.Entries = append(index.Entries, &entry)
-		mtx.Unlock()
 
 		err = saveIndex(index, dspath)
 		if err != nil {
 			panic(err)
 		}
+		reloadindex <- true
+		mtx.Unlock()
 
 	}
 
@@ -293,7 +335,24 @@ func saveIndex(index *Index, dspath string) error {
 	return nil
 }
 
-func loadIndex(dspath string) *Index {
+func parseList(n *core.IpfsNode, ctx  context.Context, hash string) ([]string,error) {
+	list := []string{""}
+	reader, err := coreunix.Cat(ctx, n, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	rawbytes, err := ioutil.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	list = strings.Split(string(rawbytes), "\n")
+	return list,nil
+
+}
+
+
+func loadIndex(n *core.IpfsNode, ctx  context.Context, dspath string) *Index {
 	index := makeIndex()
 
 	fh, err := os.Open(dspath + "/ipboh-index.txt")
@@ -312,6 +371,35 @@ func loadIndex(dspath string) *Index {
 		fmt.Println("Failed to load index:", err)
 		return index
 	}
+
+	// if there are readlist and hidelist entries, we want to grab them and parse them
+	foundr := false
+	foundw := false
+	for i := len(index.Entries) - 1; i >= 0; i-- {
+		var err error
+		if foundr && foundw {
+			break
+		}
+
+		if !foundr && index.Entries[i].Name == "readlist" {
+			fmt.Println("foundreadlist")
+			index.ReadList,err = parseList(n, ctx, index.Entries[i].Hash)
+			if err != nil {
+				fmt.Println("Failed to read readlist.\n")
+			}
+			foundr = true
+		}
+
+		if !foundw && index.Entries[i].Name == "writelist" {
+			fmt.Println("foundwritelist")
+			index.WriteList,err = parseList(n, ctx, index.Entries[i].Hash)
+			if err != nil {
+				fmt.Println("Failed to read writelist.\n")
+			}
+			foundw = true
+		}
+	}
+
 
 	return index
 
@@ -572,7 +660,7 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 		panic(err)
 	}
 
-	curentries := loadIndex(dspath)
+	curentries := loadIndex(n, ctx, dspath)
 	entrymap := make(map[string]bool)
 	if len(curentries.Entries) != 0 {
 		for i := range curentries.Entries {
@@ -1071,18 +1159,22 @@ func phase1Setup(ctx context.Context, server, spawnClientserver, clientserver bo
 }
 
 func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.WaitGroup, baseurl string, reloadindex chan bool) {
-	index := loadIndex(dspath)
+	index := loadIndex(n,ctx,dspath)
 	mtx := sync.Mutex{}
 
-	go handleIndex(n, ctx, index, wg)
-	go handleAdd(n, ctx, index, &mtx, wg, dspath)
+	getCurIndex := func() *Index {
+		return index
+	}
+
+	go handleIndex(n, ctx, index, wg, getCurIndex)
+	go handleAdd(n, ctx, index, &mtx, wg, dspath, reloadindex, getCurIndex)
 
 	go func() {
 		for {
 			<-reloadindex
 			fmt.Println("Need to reload index!")
 			mtx.Lock()
-			index = loadIndex(dspath)
+			index = loadIndex(n,ctx,dspath)
 			mtx.Unlock()
 		}
 	}()
