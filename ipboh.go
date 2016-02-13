@@ -25,16 +25,16 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/ipfs/go-ipfs/blocks/key"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
-	peer "gx/ipfs/QmUBogf4nUefBjmYjn6jfsfPJRkmDGSeMhNj4usRKq69f4/go-libp2p/p2p/peer"
-	"github.com/ipfs/go-ipfs/blocks/key"
 	fsrepo "github.com/ipfs/go-ipfs/repo/fsrepo"
 	"github.com/pivotal-golang/bytefmt"
 	"golang.org/x/crypto/openpgp"
 	"golang.org/x/crypto/openpgp/armor"
 	"golang.org/x/crypto/ssh/terminal"
+	peer "gx/ipfs/QmUBogf4nUefBjmYjn6jfsfPJRkmDGSeMhNj4usRKq69f4/go-libp2p/p2p/peer"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -45,9 +45,9 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/net/context"
 	"github.com/VividCortex/godaemon"
 	config "github.com/ipfs/go-ipfs/repo/config"
+	"golang.org/x/net/context"
 )
 
 const HEADER_SIZE = 120
@@ -58,9 +58,9 @@ type IpbohConfig struct {
 }
 
 type Index struct {
-	Entries []*Entry
-	WriteList []string
-	ReadList []string
+	Entries   []*Entry
+	WriteList []string `json:"-"`
+	ReadList  []string `json:"-"`
 }
 
 type Entry struct {
@@ -70,7 +70,7 @@ type Entry struct {
 	Size      int
 }
 
-func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup, getCurIndex func() *Index ) {
+func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup, getCurIndex func() *Index) {
 	list, err := corenet.Listen(n, "/pack/index")
 	if err != nil {
 		panic(err)
@@ -83,47 +83,48 @@ func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.W
 			fmt.Println(err)
 			return
 		}
-		defer con.Close()
 
-		index = getCurIndex()
-		fmt.Printf("Connection from: %s\n", con.Conn().RemotePeer())
-		if len(index.ReadList) != 0 {
-			present := false
-			for i := range index.ReadList {
-				fmt.Println(index.ReadList[i])
-				if con.Conn().RemotePeer().Pretty() == index.ReadList[i] {
-					present = true
-					break
+		go func() {
+			defer con.Close()
+			fmt.Println("index getting index")
+			index = getCurIndex()
+			fmt.Printf("Connection from: %s\n", con.Conn().RemotePeer())
+			if len(index.ReadList) != 0 {
+				present := false
+				for i := range index.ReadList {
+					fmt.Println(index.ReadList[i])
+					if con.Conn().RemotePeer().Pretty() == index.ReadList[i] {
+						present = true
+						break
+					}
 				}
+
+				if !present {
+					fmt.Println("Not on read list", con.Conn().RemotePeer().Pretty())
+				} else {
+					fmt.Println("On read list", con.Conn().RemotePeer().Pretty())
+				}
+
 			}
 
-			if !present {
-				fmt.Println("Not on read list", con.Conn().RemotePeer().Pretty())
-			} else {
-				fmt.Println("On read list", con.Conn().RemotePeer().Pretty())
+			indexbytes, err := json.Marshal(index)
+			if err != nil {
+				panic(err)
 			}
-
-		}
-
-
-
-		indexbytes, err := json.Marshal(index)
-		if err != nil {
-			panic(err)
-		}
-		count, err := con.Write(indexbytes)
-		if err != nil {
-			fmt.Println(err)
-		}
-		fmt.Println("Wrote bytes:", count)
-		con.Close()
+			count, err := con.Write(indexbytes)
+			if err != nil {
+				fmt.Println(err)
+			}
+			fmt.Println("Wrote bytes:", count)
+			//con.Close()
+		}()
 	}
 
 	wg.Done()
 
 }
 
-func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mutex, wg *sync.WaitGroup, dspath string, reloadindex chan bool, getCurIndex func() *Index) {
+func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mutex, wg *sync.WaitGroup, dspath string, reloadindex chan *Entry, getCurIndex func() *Index) {
 	list, err := corenet.Listen(n, "/pack/add")
 	if err != nil {
 		panic(err)
@@ -137,48 +138,43 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 			fmt.Println(err)
 			return
 		}
-		defer con.Close()
 
-		index = getCurIndex()
-		fmt.Printf("Connection from: %s\n", con.Conn().RemotePeer())
-		if len(index.WriteList) != 0 {
-			present := false
-			for i := range index.WriteList {
-				if con.Conn().RemotePeer().Pretty() == index.WriteList[i] {
-					present = true
-					break
+		go func() {
+			defer con.Close()
+
+			fmt.Println("add getting index")
+			index = getCurIndex()
+			fmt.Printf("Connection from: %s\n", con.Conn().RemotePeer())
+			if len(index.WriteList) != 0 {
+				present := false
+				for i := range index.WriteList {
+					if con.Conn().RemotePeer().Pretty() == index.WriteList[i] {
+						present = true
+						break
+					}
 				}
+
+				if !present {
+					fmt.Println("Not on write list", con.Conn().RemotePeer().Pretty())
+				} else {
+					fmt.Println("On write list", con.Conn().RemotePeer().Pretty())
+				}
+
 			}
 
-			if !present {
-				fmt.Println("Not on write list", con.Conn().RemotePeer().Pretty())
-			} else {
-				fmt.Println("On write list", con.Conn().RemotePeer().Pretty())
+			serverReader := &serverContentReader{r: con}
+
+			fmt.Println("Add request:", serverReader.Name())
+			key, err := coreunix.Add(n, serverReader)
+			if err != nil {
+				panic(err)
 			}
 
-		}
+			fmt.Println("Added:", key)
+			entry := Entry{Timestamp: time.Now(), Size: serverReader.n - HEADER_SIZE, Name: serverReader.Name(), Hash: key}
 
-
-		serverReader := &serverContentReader{r: con}
-
-		fmt.Println("Add request:", serverReader.Name())
-		key, err := coreunix.Add(n, serverReader)
-		if err != nil {
-			panic(err)
-		}
-
-		fmt.Println("Added:", key)
-		entry := Entry{Timestamp: time.Now(), Size: serverReader.n - HEADER_SIZE, Name: serverReader.Name(), Hash: key}
-
-		mtx.Lock()
-		index.Entries = append(index.Entries, &entry)
-
-		err = saveIndex(index, dspath)
-		if err != nil {
-			panic(err)
-		}
-		reloadindex <- true
-		mtx.Unlock()
+			reloadindex <- &entry
+		}()
 
 	}
 
@@ -313,30 +309,32 @@ func encryptOpenpgp(data io.Reader, recipient string, gpghome string) ([]byte, e
 	return buf.Bytes(), nil
 
 }
-
 func saveIndex(index *Index, dspath string) error {
-
 	fh, err := os.OpenFile(dspath+"/ipboh-index.txt", os.O_RDWR, 0600)
-	if err != nil {
-		fh, err = os.Create(dspath + "/ipboh-index.txt")
-		if err != nil {
-			return err
-		}
-	}
-
-	rawb, err := json.Marshal(index)
 	if err != nil {
 		return err
 	}
 
-	fh.Write(rawb)
-	fh.Close()
+	rawb, err := json.Marshal(index)
+	if err != nil {
+		fh.Close()
+		return err
+	}
 
+	fh.Write(rawb)
+
+	if err != nil {
+		fh.Close()
+		return err
+	}
+
+	fh.Close()
 	return nil
 }
 
-func parseList(n *core.IpfsNode, ctx  context.Context, hash string) ([]string,error) {
+func parseList(n *core.IpfsNode, ctx context.Context, hash string) ([]string, error) {
 	list := []string{""}
+	fmt.Println("Fetching list")
 	reader, err := coreunix.Cat(ctx, n, hash)
 	if err != nil {
 		return nil, err
@@ -347,18 +345,19 @@ func parseList(n *core.IpfsNode, ctx  context.Context, hash string) ([]string,er
 		return nil, err
 	}
 	list = strings.Split(string(rawbytes), "\n")
-	return list,nil
+	fmt.Println("Parsed list")
+	return list, nil
 
 }
 
-
-func loadIndex(n *core.IpfsNode, ctx  context.Context, dspath string) *Index {
+func loadIndex(n *core.IpfsNode, ctx context.Context, dspath string) *Index {
 	index := makeIndex()
 
 	fh, err := os.Open(dspath + "/ipboh-index.txt")
 	if err != nil {
 		return index
 	}
+	defer fh.Close()
 
 	rawb, err := ioutil.ReadAll(fh)
 	if err != nil {
@@ -383,7 +382,7 @@ func loadIndex(n *core.IpfsNode, ctx  context.Context, dspath string) *Index {
 
 		if !foundr && index.Entries[i].Name == "readlist" {
 			fmt.Println("foundreadlist")
-			index.ReadList,err = parseList(n, ctx, index.Entries[i].Hash)
+			index.ReadList, err = parseList(n, ctx, index.Entries[i].Hash)
 			if err != nil {
 				fmt.Println("Failed to read readlist.\n")
 			}
@@ -392,14 +391,13 @@ func loadIndex(n *core.IpfsNode, ctx  context.Context, dspath string) *Index {
 
 		if !foundw && index.Entries[i].Name == "writelist" {
 			fmt.Println("foundwritelist")
-			index.WriteList,err = parseList(n, ctx, index.Entries[i].Hash)
+			index.WriteList, err = parseList(n, ctx, index.Entries[i].Hash)
 			if err != nil {
 				fmt.Println("Failed to read writelist.\n")
 			}
 			foundw = true
 		}
 	}
-
 
 	return index
 
@@ -601,15 +599,15 @@ func getUpdateConfig(filepath string, serverhash string, port int) (string, int)
 
 }
 
-func pin(n *core.IpfsNode, ctx  context.Context, hash string) error {
+func pin(n *core.IpfsNode, ctx context.Context, hash string) error {
 
 	hashkey := key.B58KeyDecode(hash)
-	node,err := n.DAG.Get(ctx,hashkey)
+	node, err := n.DAG.Get(ctx, hashkey)
 	if err != nil {
 		return err
 	}
 
-	err = n.Pinning.Pin(ctx,node,false)
+	err = n.Pinning.Pin(ctx, node, false)
 	return err
 
 }
@@ -654,7 +652,7 @@ func clientHandlerCat(ctx context.Context, w http.ResponseWriter, n *core.IpfsNo
 	}
 }
 
-func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsNode, dspath string, targethash string, reloadindex chan bool) {
+func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsNode, dspath string, targethash string, reloadindex chan *Entry) {
 	target, err := peer.IDB58Decode(targethash)
 	if err != nil {
 		panic(err)
@@ -664,18 +662,18 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 	entrymap := make(map[string]bool)
 	if len(curentries.Entries) != 0 {
 		for i := range curentries.Entries {
-			key := fmt.Sprintf("%v",curentries.Entries[i])
+			key := fmt.Sprintf("%v", curentries.Entries[i])
 			//fmt.Println(key)
 			//entrymap[curentries.Entries[i].Hash] = curentries.Entries[i]
 			entrymap[key] = true
 		}
 	}
 
-	fmt.Fprintln(w,"Syncing...",target)
+	fmt.Fprintln(w, "Syncing...", target)
 	entrylist := getEntryList(n, target)
 
 	for i := range entrylist.Entries {
-		fmt.Fprintln(w,"Downloading ",entrylist.Entries[i].Name)
+		fmt.Fprintln(w, "Downloading ", entrylist.Entries[i].Name)
 		reader, err := coreunix.Cat(ctx, n, entrylist.Entries[i].Hash)
 		if err != nil {
 			panic(err)
@@ -683,11 +681,11 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 		ioutil.ReadAll(reader)
 
 		if len(curentries.Entries) != 0 {
-			_, ok := entrymap[fmt.Sprintf("%v",entrylist.Entries[i])]
+			_, ok := entrymap[fmt.Sprintf("%v", entrylist.Entries[i])]
 			if ok {
-				fmt.Fprintln(w,"Already have",entrylist.Entries[i].Hash)
+				fmt.Fprintln(w, "Already have", entrylist.Entries[i].Hash)
 			} else {
-				fmt.Fprintln(w,"Appending",entrylist.Entries[i].Hash)
+				fmt.Fprintln(w, "Appending", entrylist.Entries[i].Hash)
 				curentries.Entries = append(curentries.Entries, entrylist.Entries[i])
 			}
 		}
@@ -696,17 +694,17 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 		if err != nil {
 			panic(err)
 		}
-		fmt.Fprintln(w,"Pinned",entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
+		fmt.Fprintln(w, "Pinned", entrylist.Entries[i].Hash, entrylist.Entries[i].Name)
 	}
 
 	if len(curentries.Entries) != 0 {
-		saveIndex(curentries,dspath)
+		saveIndex(curentries, dspath)
 	} else {
-		saveIndex(entrylist,dspath)
+		saveIndex(entrylist, dspath)
 	}
 
-	fmt.Fprintln(w,"Sync complete.")
-	reloadindex <- true
+	fmt.Fprintln(w, "Sync complete.")
+	reloadindex <- &Entry{}
 }
 
 func clientHandlerLs(w http.ResponseWriter, n *core.IpfsNode, targethash string) {
@@ -780,7 +778,7 @@ func clientHandlerIndex(w http.ResponseWriter, ctx context.Context, n *core.Ipfs
 	return
 }
 
-func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, defsrvhash string, dspath string, timeout time.Duration, reloadindex chan bool) {
+func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, defsrvhash string, dspath string, timeout time.Duration, reloadindex chan *Entry) {
 
 	timer := time.NewTimer(timeout)
 	if timeout != 0 {
@@ -830,8 +828,6 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 		clientHandlerSync(w, ctx, n, dspath, targethash, reloadindex)
 
 	})
-
-
 
 	http.HandleFunc("/ls", func(w http.ResponseWriter, r *http.Request) {
 		timer.Reset(timeout)
@@ -978,7 +974,7 @@ func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string) {
 	//defer resp.Close()
 	bufr := bufio.NewReader(resp)
 	pbytes, err := bufr.Peek(40)
-	if err != nil && fmt.Sprintf("%s",err) != "EOF" {
+	if err != nil && fmt.Sprintf("%s", err) != "EOF" {
 		panic(err)
 	}
 
@@ -1024,7 +1020,7 @@ func addContent(add string, gpghome string, recipient string, baseurl string, se
 
 	sbytes := []byte(add)
 	if len(sbytes) > HEADER_SIZE {
-		panic(fmt.Sprintf("Name '%s' longer than %d",sbytes,HEADER_SIZE))
+		panic(fmt.Sprintf("Name '%s' longer than %d", sbytes, HEADER_SIZE))
 	}
 
 	newcontent := &clientContentReader{name: add, r: os.Stdin}
@@ -1158,11 +1154,15 @@ func phase1Setup(ctx context.Context, server, spawnClientserver, clientserver bo
 	return n, serverhash, port, csBaseUrl, spawnClientserver
 }
 
-func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.WaitGroup, baseurl string, reloadindex chan bool) {
-	index := loadIndex(n,ctx,dspath)
+func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.WaitGroup, baseurl string, reloadindex chan *Entry) {
+	index := loadIndex(n, ctx, dspath)
 	mtx := sync.Mutex{}
 
 	getCurIndex := func() *Index {
+		fmt.Println("ingetcurindex")
+		mtx.Lock()
+		defer mtx.Unlock()
+		fmt.Println("returnedgetcurindex")
 		return index
 	}
 
@@ -1171,11 +1171,25 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 
 	go func() {
 		for {
-			<-reloadindex
+			entry := <-reloadindex
 			fmt.Println("Need to reload index!")
+
 			mtx.Lock()
-			index = loadIndex(n,ctx,dspath)
+			fmt.Println("locky")
+			index.Entries = append(index.Entries, entry)
+
+			// we don't need to do this everytime...
+			err := saveIndex(index, dspath)
+			if err != nil {
+				panic(err)
+			}
+
+			if entry.Name == "readlist" || entry.Name == "writelist" {
+				index = loadIndex(n, ctx, dspath)
+			}
+			fmt.Println("unlocky")
 			mtx.Unlock()
+
 		}
 	}()
 
@@ -1204,11 +1218,11 @@ func processClientCommands(spawnClientserver bool, serverhash string, syncremote
 		// cat something
 	} else if catarg != "" {
 		rdr := catContent(catarg, csBaseUrl, serverhash)
-		catCatContent(rdr,os.Stdout,gpghome,gpgpass)
+		catCatContent(rdr, os.Stdout, gpghome, gpgpass)
 	} else if syncremote {
-		rdr := syncRemote(csBaseUrl,serverhash)
+		rdr := syncRemote(csBaseUrl, serverhash)
 		io.Copy(os.Stdout, rdr)
-	// fetch entry list by default
+		// fetch entry list by default
 	} else {
 		listEntries(csBaseUrl, serverhash, verbose)
 
@@ -1237,7 +1251,7 @@ func main() {
 
 	server, syncremote, add, catarg = parseCommandFromArgs()
 
-	reloadindex := make(chan bool)
+	reloadindex := make(chan *Entry)
 
 	// 'phase 1' initial setup...
 	//ctx, cancel := context.WithCancel(context.Background())
@@ -1258,8 +1272,7 @@ func main() {
 			}
 		}()
 
-
-		startClientServer(ctx, n, csBaseUrl, serverhash, dspath, time.Duration(timeout) * time.Minute, reloadindex)
+		startClientServer(ctx, n, csBaseUrl, serverhash, dspath, time.Duration(timeout)*time.Minute, reloadindex)
 		// run client command
 	} else {
 		processClientCommands(spawnClientserver, serverhash, syncremote, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
