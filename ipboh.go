@@ -86,7 +86,6 @@ func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.W
 
 		go func() {
 			defer con.Close()
-			fmt.Println("index getting index")
 			index = getCurIndex()
 			fmt.Printf("Connection from: %s\n", con.Conn().RemotePeer())
 			if len(index.ReadList) != 0 {
@@ -142,7 +141,6 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 		go func() {
 			defer con.Close()
 
-			fmt.Println("add getting index")
 			index = getCurIndex()
 			fmt.Printf("Connection from: %s\n", con.Conn().RemotePeer())
 			if len(index.WriteList) != 0 {
@@ -314,21 +312,19 @@ func saveIndex(index *Index, dspath string) error {
 	if err != nil {
 		return err
 	}
+	defer fh.Close()
 
 	rawb, err := json.Marshal(index)
 	if err != nil {
-		fh.Close()
 		return err
 	}
 
 	fh.Write(rawb)
 
 	if err != nil {
-		fh.Close()
 		return err
 	}
 
-	fh.Close()
 	return nil
 }
 
@@ -690,6 +686,8 @@ func clientHandlerSync(w http.ResponseWriter, ctx context.Context, n *core.IpfsN
 			}
 		}
 
+
+		//FIXME: potential data corruption because it could collide with the main startserver thread running
 		err = pin(n, ctx, entrylist.Entries[i].Hash)
 		if err != nil {
 			panic(err)
@@ -1166,6 +1164,25 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 		return index
 	}
 
+	go func() {
+		prevlen := len(index.Entries)
+		for {
+			time.Sleep(5*time.Second)
+			mtx.Lock()
+			if len(index.Entries) > prevlen {
+				prevlen = len(index.Entries)
+				fmt.Println("Saving/reloading index...")
+				err := saveIndex(index, dspath)
+				if err != nil {
+					panic(err)
+				}
+				//index = loadIndex(n, ctx, dspath)
+
+			}
+			mtx.Unlock()
+		}
+	}()
+
 	go handleIndex(n, ctx, index, wg, getCurIndex)
 	go handleAdd(n, ctx, index, &mtx, wg, dspath, reloadindex, getCurIndex)
 
@@ -1179,12 +1196,16 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 			index.Entries = append(index.Entries, entry)
 
 			// we don't need to do this everytime...
-			err := saveIndex(index, dspath)
+			/*err := saveIndex(index, dspath)
 			if err != nil {
 				panic(err)
-			}
+			}*/
 
 			if entry.Name == "readlist" || entry.Name == "writelist" {
+				err := saveIndex(index, dspath)
+				if err != nil {
+					panic(err)
+				}
 				index = loadIndex(n, ctx, dspath)
 			}
 			fmt.Println("unlocky")
