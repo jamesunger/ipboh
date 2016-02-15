@@ -1157,10 +1157,8 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	mtx := sync.Mutex{}
 
 	getCurIndex := func() *Index {
-		fmt.Println("ingetcurindex")
 		mtx.Lock()
 		defer mtx.Unlock()
-		fmt.Println("returnedgetcurindex")
 		return index
 	}
 
@@ -1171,7 +1169,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 			mtx.Lock()
 			if len(index.Entries) > prevlen {
 				prevlen = len(index.Entries)
-				fmt.Println("Saving/reloading index...")
+				fmt.Println("Saving index...")
 				err := saveIndex(index, dspath)
 				if err != nil {
 					panic(err)
@@ -1193,7 +1191,12 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 
 			mtx.Lock()
 			fmt.Println("locky")
-			index.Entries = append(index.Entries, entry)
+			// we just synced and the whole index changed underneath us
+			if entry.Name == "" && entry.Hash == "" {
+				index = loadIndex(n, ctx, dspath)
+			} else {
+				index.Entries = append(index.Entries, entry)
+			}
 
 			// we don't need to do this everytime...
 			/*err := saveIndex(index, dspath)
