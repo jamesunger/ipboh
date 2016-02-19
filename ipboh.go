@@ -789,6 +789,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 
 	http.HandleFunc("/areuthere", func(w http.ResponseWriter, r *http.Request) {
 		timer.Reset(timeout)
+		fmt.Fprintf(w,"%s",n.Identity.Pretty())
 		return
 	})
 
@@ -1079,11 +1080,12 @@ func basicInit() (string, string, string, sync.WaitGroup) {
 	return dspath, home, gpghomeDefault, wg
 }
 
-func parseCommandFromArgs() (bool, bool, string, string) {
-	var server, syncremote bool
+func parseCommandFromArgs() (bool, bool, bool, string, string) {
+	var server, syncremote,id bool
 	var add, catarg string
 	server = hasCmd("server")
 	syncremote = hasCmd("sync")
+	id = hasCmd("id")
 	if hasCmd("add") {
 		add = getCmdArg("add")
 	}
@@ -1092,7 +1094,7 @@ func parseCommandFromArgs() (bool, bool, string, string) {
 		catarg = getCmdArg("cat")
 	}
 
-	return server, syncremote, add, catarg
+	return server, syncremote, id, add, catarg
 }
 
 // setup initial things, spawn server if needed, any prereqs
@@ -1221,7 +1223,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	wg.Wait()
 }
 
-func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
+func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
 	if spawnClientserver {
 		//fmt.Println("Sleeping for 10 seconds...\n")
 		err := waitForClientserver(20, csBaseUrl)
@@ -1247,6 +1249,19 @@ func processClientCommands(spawnClientserver bool, serverhash string, syncremote
 		rdr := syncRemote(csBaseUrl, serverhash)
 		io.Copy(os.Stdout, rdr)
 		// fetch entry list by default
+	} else if id {
+		resp, err := http.Get(fmt.Sprintf("%s/areuthere", csBaseUrl))
+		if err != nil {
+			panic(err)
+		}
+
+		remotehash,err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println("Local",string(remotehash))
+		fmt.Println("Remote",serverhash)
 	} else {
 		listEntries(csBaseUrl, serverhash, verbose)
 
@@ -1257,7 +1272,7 @@ func main() {
 
 	dspath, home, gpghomeDefault, wg := basicInit()
 
-	var server, verbose, clientserver, spawnClientserver, syncremote bool
+	var server, verbose, clientserver, spawnClientserver, syncremote, id bool
 	var serverhash, add, gpghome, gpgpass string
 	var catarg, recipient string
 	var port, timeout int
@@ -1273,7 +1288,7 @@ func main() {
 	flag.IntVar(&timeout, "t", 30, "Timeout of server if not used")
 	flag.Parse()
 
-	server, syncremote, add, catarg = parseCommandFromArgs()
+	server, syncremote, id, add, catarg = parseCommandFromArgs()
 
 	reloadindex := make(chan *Entry)
 
@@ -1299,7 +1314,7 @@ func main() {
 		startClientServer(ctx, n, csBaseUrl, serverhash, dspath, time.Duration(timeout)*time.Minute, reloadindex)
 		// run client command
 	} else {
-		processClientCommands(spawnClientserver, serverhash, syncremote, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
+		processClientCommands(spawnClientserver, serverhash, syncremote, id, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
 	}
 
 }
