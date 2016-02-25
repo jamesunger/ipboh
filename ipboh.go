@@ -310,7 +310,10 @@ func encryptOpenpgp(data io.Reader, recipient string, gpghome string) ([]byte, e
 func saveIndex(index *Index, dspath string) error {
 	fh, err := os.OpenFile(dspath+"/ipboh-index.txt", os.O_RDWR, 0600)
 	if err != nil {
-		return err
+		fh, err = os.Create(dspath + "/ipboh-index.txt")
+		if err != nil {
+			return err
+		}
 	}
 	defer fh.Close()
 
