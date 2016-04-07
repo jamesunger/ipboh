@@ -14,6 +14,9 @@ build-windows: deps
 build-android: deps
 	CGO_ENABLED=1 CC=arm-linux-androideabi-gcc CXX=arm-linux-androideabi-g++ GOOS=android GOARCH=arm GOARM=7 go build ipboh.go
 
+build-pi: deps
+	GOOS=linux GOARCH=arm GOARM=5 go build ipboh.go
+
 test: deps
 	rm -rf test/.ipfs
 	rm -f test/ipboh-index.txt

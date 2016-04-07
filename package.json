@@ -4,9 +4,17 @@
   "gxDependencies": [
     {
       "name": "go-libp2p",
-      "hash": "QmUBogf4nUefBjmYjn6jfsfPJRkmDGSeMhNj4usRKq69f4",
+      "hash": "QmSN2ELGRp4T9kjqiSsSNJRUeR9JKXzQEgwe1HH3tdSGbC",
+      "version": "1.0.0"
+    },
+    {
+      "name": "net",
+      "hash": "QmSN2ELGRp4T9kjqiSsSNJRUeR9JKXzQEgwe1HH3tdSGbC",
       "version": "1.0.0"
     }
+
+
+
   ],
   "language": "go",
   "issues_url": "https://github.com/jamesunger/ipboh"
