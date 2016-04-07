@@ -26,6 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/ipfs/go-ipfs/blocks/key"
+	net "gx/ipfs/QmSN2ELGRp4T9kjqiSsSNJRUeR9JKXzQEgwe1HH3tdSGbC/go-libp2p/p2p/net"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -34,7 +35,7 @@ import (
 	"golang.org/x/crypto/openpgp"
 	"golang.org/x/crypto/openpgp/armor"
 	"golang.org/x/crypto/ssh/terminal"
-	peer "gx/ipfs/QmUBogf4nUefBjmYjn6jfsfPJRkmDGSeMhNj4usRKq69f4/go-libp2p/p2p/peer"
+	peer "gx/ipfs/QmSN2ELGRp4T9kjqiSsSNJRUeR9JKXzQEgwe1HH3tdSGbC/go-libp2p/p2p/peer"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -51,6 +52,8 @@ import (
 )
 
 const HEADER_SIZE = 120
+const MAXTRIES = 10
+const REQUIREDPEERS = 35
 
 type IpbohConfig struct {
 	Serverhash string
@@ -180,10 +183,34 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 
 }
 
+func MyDial(n *core.IpfsNode, target peer.ID, protoid string) (net.Stream,error) {
+
+	var con net.Stream
+	var err error
+	for i := 0; i < MAXTRIES; i++ {
+		con, err = corenet.Dial(n, target, protoid)
+		if err != nil && i > MAXTRIES {
+			fmt.Fprintln(os.Stderr, "Dial failed to connect, tried",i,"times. Giving up.")
+			fmt.Fprintln(os.Stderr, fmt.Sprintf("%s",err))
+			return nil,err
+		} else if err != nil {
+			var sleeptime time.Duration
+			sleeptime = time.Duration(i)
+			time.Sleep(sleeptime*time.Second)
+			fmt.Fprintln(os.Stderr, "Dial failed, retrying: ",err)
+		} else if err == nil {
+			return con,err
+		}
+	}
+
+	return con,err
+
+}
+
 func getEntryList(n *core.IpfsNode, target peer.ID) *Index {
 
 	index := makeIndex()
-	con, err := corenet.Dial(n, target, "/pack/index")
+	con, err := MyDial(n, target, "/pack/index")
 	if err != nil {
 		fmt.Println(err)
 		return index
@@ -731,7 +758,7 @@ func clientHandlerAdd(w http.ResponseWriter, rdr io.Reader, n *core.IpfsNode, ta
 	}
 
 	//fmt.Println("Dialing...", targethash)
-	con, err := corenet.Dial(n, target, "/pack/add")
+	con, err := MyDial(n, target, "/pack/add")
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -781,6 +808,24 @@ func clientHandlerIndex(w http.ResponseWriter, ctx context.Context, n *core.Ipfs
 
 func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, defsrvhash string, dspath string, timeout time.Duration, reloadindex chan *Entry) {
 
+
+	amiready := false
+
+	go func() {
+		fmt.Println("Bootstrapping IPFS...")
+		for {
+			peers := n.Peerstore.Peers()
+			if len(peers) >= REQUIREDPEERS {
+				amiready = true
+				fmt.Fprintln(os.Stderr, "Peers:",len(peers))
+				return
+			}
+
+
+			time.Sleep(1*time.Second)
+		}
+	}()
+
 	timer := time.NewTimer(timeout)
 	if timeout != 0 {
 		go func() {
@@ -791,6 +836,10 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 	}
 
 	http.HandleFunc("/areuthere", func(w http.ResponseWriter, r *http.Request) {
+		if !amiready {
+			http.Error(w,"Not ready", 400)
+			return
+		}
 		timer.Reset(timeout)
 		fmt.Fprintf(w,"%s",n.Identity.Pretty())
 		return
@@ -868,6 +917,11 @@ func waitForClientserver(count int, baseurl string) error {
 	for i := 0; i <= count; i++ {
 		resp, err := http.Get(fmt.Sprintf("%s/areuthere", baseurl))
 		if err != nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		if resp.StatusCode != 200 {
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -1229,10 +1283,11 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
 	if spawnClientserver {
 		//fmt.Println("Sleeping for 10 seconds...\n")
-		err := waitForClientserver(20, csBaseUrl)
+		err := waitForClientserver(120, csBaseUrl)
 		if err != nil {
 			panic(err)
 		}
+		//time.Sleep(10 * time.Second)
 	}
 
 	if serverhash == "" {
