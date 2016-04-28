@@ -2,16 +2,16 @@
   "name": "ipboh",
   "version": "0.0.2",
   "gxDependencies": [
-    {
-      "name": "go-libp2p",
-      "hash": "QmSN2ELGRp4T9kjqiSsSNJRUeR9JKXzQEgwe1HH3tdSGbC",
-      "version": "1.0.0"
-    },
-    {
-      "name": "net",
-      "hash": "QmSN2ELGRp4T9kjqiSsSNJRUeR9JKXzQEgwe1HH3tdSGbC",
-      "version": "1.0.0"
-    }
+  {
+        "hash": "QmXDvxcXUYn2DDnGKJwdQPxkJgG83jBTp5UmmNzeHzqbj5",
+        "name": "go-libp2p"
+  },
+  {
+        "author": "whyrusleeping",
+        "hash": "QmZwZjMVGss5rqYsJVGy18gNbkTJffFyq2x1uJ4e4p3ZAt",
+        "name": "go-libp2p-peer",
+	"version": "1.0.2"
+   }
 
 
 
