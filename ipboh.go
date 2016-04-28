@@ -26,7 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/ipfs/go-ipfs/blocks/key"
-	net "gx/ipfs/QmSN2ELGRp4T9kjqiSsSNJRUeR9JKXzQEgwe1HH3tdSGbC/go-libp2p/p2p/net"
+	net "gx/ipfs/QmXDvxcXUYn2DDnGKJwdQPxkJgG83jBTp5UmmNzeHzqbj5/go-libp2p/p2p/net"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -35,7 +35,7 @@ import (
 	"golang.org/x/crypto/openpgp"
 	"golang.org/x/crypto/openpgp/armor"
 	"golang.org/x/crypto/ssh/terminal"
-	peer "gx/ipfs/QmSN2ELGRp4T9kjqiSsSNJRUeR9JKXzQEgwe1HH3tdSGbC/go-libp2p/p2p/peer"
+	peer "gx/ipfs/QmZwZjMVGss5rqYsJVGy18gNbkTJffFyq2x1uJ4e4p3ZAt/go-libp2p-peer"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -53,7 +53,7 @@ import (
 
 const HEADER_SIZE = 120
 const MAXTRIES = 10
-const REQUIREDPEERS = 35
+const REQUIREDPEERS = 10
 
 type IpbohConfig struct {
 	Serverhash string
@@ -197,7 +197,7 @@ func MyDial(n *core.IpfsNode, target peer.ID, protoid string) (net.Stream,error)
 			var sleeptime time.Duration
 			sleeptime = time.Duration(i)
 			time.Sleep(sleeptime*time.Second)
-			fmt.Fprintln(os.Stderr, "Dial failed, retrying: ",err)
+			fmt.Fprintln(os.Stderr, "Dial failed, retrying:",err)
 		} else if err == nil {
 			return con,err
 		}
@@ -812,7 +812,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 	amiready := false
 
 	go func() {
-		fmt.Println("Bootstrapping IPFS...")
+		fmt.Fprintln(os.Stderr,"Bootstrapping IPFS...")
 		for {
 			peers := n.Peerstore.Peers()
 			if len(peers) >= REQUIREDPEERS {
@@ -820,6 +820,7 @@ func startClientServer(ctx context.Context, n *core.IpfsNode, baseurl string, de
 				fmt.Fprintln(os.Stderr, "Peers:",len(peers))
 				return
 			}
+			fmt.Fprintln(os.Stderr, "Peers:",len(peers))
 
 
 			time.Sleep(1*time.Second)
@@ -1024,7 +1025,7 @@ func catContent(catarg string, baseurl string, serverhash string) (rdr io.Reader
 
 }
 
-func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string) {
+func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string, raw bool) {
 	ispgp := false
 
 	//defer resp.Close()
@@ -1034,7 +1035,8 @@ func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string) {
 		panic(err)
 	}
 
-	if strings.Contains(string(pbytes), "BEGIN PGP MESSAGE") {
+	// we need to decrypt this message unless the user requested not to
+	if strings.Contains(string(pbytes), "BEGIN PGP MESSAGE") && !raw {
 		ispgp = true
 	}
 
@@ -1280,7 +1282,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	wg.Wait()
 }
 
-func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
+func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string, raw bool) {
 	if spawnClientserver {
 		//fmt.Println("Sleeping for 10 seconds...\n")
 		err := waitForClientserver(120, csBaseUrl)
@@ -1302,7 +1304,7 @@ func processClientCommands(spawnClientserver bool, serverhash string, syncremote
 		// cat something
 	} else if catarg != "" {
 		rdr := catContent(catarg, csBaseUrl, serverhash)
-		catCatContent(rdr, os.Stdout, gpghome, gpgpass)
+		catCatContent(rdr, os.Stdout, gpghome, gpgpass, raw)
 	} else if syncremote {
 		rdr := syncRemote(csBaseUrl, serverhash)
 		io.Copy(os.Stdout, rdr)
@@ -1330,7 +1332,7 @@ func main() {
 
 	dspath, home, gpghomeDefault, wg := basicInit()
 
-	var server, verbose, clientserver, spawnClientserver, syncremote, id bool
+	var server, verbose, clientserver, spawnClientserver, syncremote, id, dontdecrypt bool
 	var serverhash, add, gpghome, gpgpass string
 	var catarg, recipient string
 	var port, timeout int
@@ -1343,6 +1345,7 @@ func main() {
 	flag.StringVar(&dspath, "d", dspath, "Default data path.")
 	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
+	flag.BoolVar(&dontdecrypt, "r", false, "Do not attempt to decrypt PGP message but grab the raw message.")
 	flag.IntVar(&timeout, "t", 30, "Timeout of server if not used")
 	flag.Parse()
 
@@ -1372,7 +1375,7 @@ func main() {
 		startClientServer(ctx, n, csBaseUrl, serverhash, dspath, time.Duration(timeout)*time.Minute, reloadindex)
 		// run client command
 	} else {
-		processClientCommands(spawnClientserver, serverhash, syncremote, id, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
+		processClientCommands(spawnClientserver, serverhash, syncremote, id, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl, dontdecrypt)
 	}
 
 }
