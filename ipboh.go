@@ -26,7 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/ipfs/go-ipfs/blocks/key"
-	net "gx/ipfs/QmXDvxcXUYn2DDnGKJwdQPxkJgG83jBTp5UmmNzeHzqbj5/go-libp2p/p2p/net"
+	net "gx/ipfs/QmVCe3SNMjkcPgnpFhZs719dheq6xE7gJwjzV7aWcUM4Ms/go-libp2p/p2p/net"
 	core "github.com/ipfs/go-ipfs/core"
 	corenet "github.com/ipfs/go-ipfs/core/corenet"
 	coreunix "github.com/ipfs/go-ipfs/core/coreunix"
@@ -35,7 +35,7 @@ import (
 	"golang.org/x/crypto/openpgp"
 	"golang.org/x/crypto/openpgp/armor"
 	"golang.org/x/crypto/ssh/terminal"
-	peer "gx/ipfs/QmZwZjMVGss5rqYsJVGy18gNbkTJffFyq2x1uJ4e4p3ZAt/go-libp2p-peer"
+	peer "gx/ipfs/QmRBqJF7hb8ZSpRcMwUt8hNhydWcxGEhtk81HKq6oUwKvs/go-libp2p-peer"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -244,7 +244,7 @@ func findKey(keyring openpgp.EntityList, name string) *openpgp.Entity {
 	return nil
 }
 
-func decryptOpenpgp(data io.Reader, gpghome string, pass []byte) (io.Reader, error) {
+func decryptOpenpgp(data io.Reader, gpghome string, pass []byte, isarmored bool) (io.Reader, error) {
 	privkeyfile, err := os.Open(fmt.Sprintf("%s%ssecring.gpg", gpghome, string(os.PathSeparator)))
 	if err != nil {
 		fmt.Println("Failed to open secring", err)
@@ -261,11 +261,6 @@ func decryptOpenpgp(data io.Reader, gpghome string, pass []byte) (io.Reader, err
 	//brk,_ := ioutil.ReadAll(data)
 	//fmt.Println("wtf",string(brk))
 	//fmt.Println("here is where eof panic")
-	block, err := armor.Decode(data)
-	if err != nil {
-		fmt.Println(err)
-		panic(err)
-	}
 
 	if len(pass) == 0 {
 		fmt.Fprintf(os.Stderr, "Password: ")
@@ -288,18 +283,29 @@ func decryptOpenpgp(data io.Reader, gpghome string, pass []byte) (io.Reader, err
 		}
 	}
 
-	md, err := openpgp.ReadMessage(block.Body, privring, nil, nil)
-	if err != nil {
-		return nil, err
+
+	if isarmored {
+		block, err := armor.Decode(data)
+		if err != nil {
+			fmt.Println(err)
+			panic(err)
+		}
+
+		md, err := openpgp.ReadMessage(block.Body, privring, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		return md.UnverifiedBody, nil
+	} else {
+		md, err := openpgp.ReadMessage(data, privring, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		return md.UnverifiedBody, nil
 	}
 
-	return md.UnverifiedBody, nil
-
-	//plaintext, err := ioutil.ReadAll(md.UnverifiedBody)
-	//if err != nil {
-	//		panic(err)
-	//	}
-	//	return plaintext, nil
 }
 
 func encryptOpenpgp(data io.Reader, recipient string, gpghome string) ([]byte, error) {
@@ -318,15 +324,16 @@ func encryptOpenpgp(data io.Reader, recipient string, gpghome string) ([]byte, e
 	pubkey := findKey(pubring, recipient)
 
 	buf := bytes.NewBuffer(nil)
-	w, _ := armor.Encode(buf, "PGP MESSAGE", nil)
-	plaintext, err := openpgp.Encrypt(w, []*openpgp.Entity{pubkey}, nil, nil, nil)
+	//w, _ := armor.Encode(buf, "PGP MESSAGE", nil)
+	plaintext, err := openpgp.Encrypt(buf, []*openpgp.Entity{pubkey}, nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	//reader := bytes.NewReader(data)
 	_, err = io.Copy(plaintext, data)
 	plaintext.Close()
-	w.Close()
+	//w.Close()
+	//buf.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -1025,8 +1032,13 @@ func catContent(catarg string, baseurl string, serverhash string) (rdr io.Reader
 
 }
 
-func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string, raw bool) {
+func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string, decrypt bool) {
 	ispgp := false
+	isarmored := false
+
+	if decrypt == true {
+		ispgp = true
+	}
 
 	//defer resp.Close()
 	bufr := bufio.NewReader(resp)
@@ -1036,21 +1048,22 @@ func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string, raw b
 	}
 
 	// we need to decrypt this message unless the user requested not to
-	if strings.Contains(string(pbytes), "BEGIN PGP MESSAGE") && !raw {
+	if strings.Contains(string(pbytes), "BEGIN PGP MESSAGE") {
 		ispgp = true
+		isarmored = true
 	}
 
 	if ispgp {
 		//fmt.Println("orig", string(bytes))
-		rdr, err := decryptOpenpgp(bufr, gpghome, []byte(gpgpass))
+		rdr, err := decryptOpenpgp(bufr, gpghome, []byte(gpgpass), isarmored)
 		if err != nil {
-			fmt.Println("Failed to decrypt:", err)
+			fmt.Fprintln(os.Stderr,"Failed to decrypt:", err)
 			panic(err)
 		}
 
 		_, err = io.Copy(wtr, rdr)
 		if err != nil {
-			fmt.Println("Failed to write to stdout")
+			fmt.Fprintln(os.Stderr, "Failed to write to stdout")
 			panic(err)
 		}
 
@@ -1058,7 +1071,7 @@ func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string, raw b
 
 		_, err = io.Copy(wtr, bufr)
 		if err != nil {
-			fmt.Println("Failed to write to stdout")
+			fmt.Fprintln(os.Stderr,"Failed to write to stdout")
 			panic(err)
 		}
 	}
@@ -1282,7 +1295,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	wg.Wait()
 }
 
-func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string, raw bool) {
+func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string, decrypt bool) {
 	if spawnClientserver {
 		//fmt.Println("Sleeping for 10 seconds...\n")
 		err := waitForClientserver(120, csBaseUrl)
@@ -1304,7 +1317,7 @@ func processClientCommands(spawnClientserver bool, serverhash string, syncremote
 		// cat something
 	} else if catarg != "" {
 		rdr := catContent(catarg, csBaseUrl, serverhash)
-		catCatContent(rdr, os.Stdout, gpghome, gpgpass, raw)
+		catCatContent(rdr, os.Stdout, gpghome, gpgpass, decrypt)
 	} else if syncremote {
 		rdr := syncRemote(csBaseUrl, serverhash)
 		io.Copy(os.Stdout, rdr)
@@ -1332,20 +1345,20 @@ func main() {
 
 	dspath, home, gpghomeDefault, wg := basicInit()
 
-	var server, verbose, clientserver, spawnClientserver, syncremote, id, dontdecrypt bool
+	var server, verbose, clientserver, spawnClientserver, syncremote, id, decrypt bool
 	var serverhash, add, gpghome, gpgpass string
 	var catarg, recipient string
 	var port, timeout int
 
 	flag.BoolVar(&verbose, "v", false, "Verbose")
-	flag.StringVar(&recipient, "e", "", "Encrypt or decrypt to PGP recipient")
+	flag.StringVar(&recipient, "e", "", "Encrypt to PGP recipient")
 	flag.StringVar(&gpghome, "g", gpghomeDefault, "GPG homedir.")
 	flag.StringVar(&gpgpass, "gpass", "", "GPG password. This is insecure and only used on Windows where reading from the terminal breaks.")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
 	flag.StringVar(&dspath, "d", dspath, "Default data path.")
 	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
-	flag.BoolVar(&dontdecrypt, "r", false, "Do not attempt to decrypt PGP message but grab the raw message.")
+	flag.BoolVar(&decrypt, "r", false, "Decrypt a message.")
 	flag.IntVar(&timeout, "t", 30, "Timeout of server if not used")
 	flag.Parse()
 
@@ -1375,7 +1388,7 @@ func main() {
 		startClientServer(ctx, n, csBaseUrl, serverhash, dspath, time.Duration(timeout)*time.Minute, reloadindex)
 		// run client command
 	} else {
-		processClientCommands(spawnClientserver, serverhash, syncremote, id, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl, dontdecrypt)
+		processClientCommands(spawnClientserver, serverhash, syncremote, id, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl, decrypt)
 	}
 
 }
