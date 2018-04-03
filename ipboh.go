@@ -19,7 +19,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -33,8 +32,6 @@ import (
 	fsrepo "github.com/ipfs/go-ipfs/repo/fsrepo"
 	"github.com/pivotal-golang/bytefmt"
 	"golang.org/x/crypto/openpgp"
-	"golang.org/x/crypto/openpgp/armor"
-	"golang.org/x/crypto/ssh/terminal"
 	peer "gx/ipfs/QmRBqJF7hb8ZSpRcMwUt8hNhydWcxGEhtk81HKq6oUwKvs/go-libp2p-peer"
 	"io"
 	"io/ioutil"
@@ -58,6 +55,7 @@ const REQUIREDPEERS = 3
 type IpbohConfig struct {
 	Serverhash string
 	Port       int
+	Autoenc	   string // gpg recipient to auto encrypt with
 }
 
 type Index struct {
@@ -244,6 +242,7 @@ func findKey(keyring openpgp.EntityList, name string) *openpgp.Entity {
 	return nil
 }
 
+/*
 func decryptOpenpgp(data io.Reader, gpghome string, pass []byte, isarmored bool) (io.Reader, error) {
 	privkeyfile, err := os.Open(fmt.Sprintf("%s%ssecring.gpg", gpghome, string(os.PathSeparator)))
 	if err != nil {
@@ -265,6 +264,7 @@ func decryptOpenpgp(data io.Reader, gpghome string, pass []byte, isarmored bool)
 	if len(pass) == 0 {
 		fmt.Fprintf(os.Stderr, "Password: ")
 		pass, err = terminal.ReadPassword(0)
+		fmt.Println("pass",string(pass))
 		if err != nil {
 			panic(err)
 		}
@@ -307,6 +307,7 @@ func decryptOpenpgp(data io.Reader, gpghome string, pass []byte, isarmored bool)
 	}
 
 }
+*/
 
 func encryptOpenpgp(data io.Reader, recipient string, gpghome string) (*bytes.Buffer, error) {
 	pubkeyfile, err := os.Open(fmt.Sprintf("%s%spubring.gpg", gpghome, string(os.PathSeparator)))
@@ -1033,55 +1034,25 @@ func catContent(catarg string, baseurl string, serverhash string) (rdr io.Reader
 
 }
 
-func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string, decrypt bool) {
-	ispgp := false
-	isarmored := false
-
-	if decrypt == true {
-		ispgp = true
-	}
+func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string) {
 
 	//defer resp.Close()
-	bufr := bufio.NewReader(resp)
-	pbytes, err := bufr.Peek(40)
-	if err != nil && fmt.Sprintf("%s", err) != "EOF" {
+	//bufr := bufio.NewReader(resp)
+	//if err != nil && fmt.Sprintf("%s", err) != "EOF" {
+	//	panic(err)
+	//}
+
+	_, err := io.Copy(wtr, resp)
+	if err != nil {
+		fmt.Fprintln(os.Stderr,"Failed to write to stdout")
 		panic(err)
 	}
-
-	// we need to decrypt this message unless the user requested not to
-	if strings.Contains(string(pbytes), "BEGIN PGP MESSAGE") {
-		ispgp = true
-		isarmored = true
-	}
-
-	if ispgp {
-		//fmt.Println("orig", string(bytes))
-		rdr, err := decryptOpenpgp(bufr, gpghome, []byte(gpgpass), isarmored)
-		if err != nil {
-			fmt.Fprintln(os.Stderr,"Failed to decrypt:", err)
-			panic(err)
-		}
-
-		_, err = io.Copy(wtr, rdr)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to write to stdout")
-			panic(err)
-		}
-
-	} else {
-
-		_, err = io.Copy(wtr, bufr)
-		if err != nil {
-			fmt.Fprintln(os.Stderr,"Failed to write to stdout")
-			panic(err)
-		}
-	}
-
 }
 
 func addContent(add string, gpghome string, recipient string, baseurl string, serverhash string) {
 
 	var encbuf *bytes.Buffer
+	var newcontent *clientContentReader
 	var err error
 	if recipient != "" {
 		encbuf, err = encryptOpenpgp(os.Stdin, recipient, gpghome)
@@ -1095,16 +1066,19 @@ func addContent(add string, gpghome string, recipient string, baseurl string, se
 		panic(fmt.Sprintf("Name '%s' longer than %d", sbytes, HEADER_SIZE))
 	}
 
-	newcontent := &clientContentReader{name: add, r: os.Stdin}
 	if encbuf != nil {
-		newcontent.r = encbuf
+		newcontent = &clientContentReader{name: add, r: encbuf}
+		//io.Copy(encbuf,newcontent.r)
+		//newcontent.r = encbuf
+	} else {
+		newcontent = &clientContentReader{name: add, r: os.Stdin}
 	}
 	resp, err := http.Post(fmt.Sprintf("%s/add?target=%s", baseurl, serverhash), "application/json", newcontent)
+	resp.Body.Close()
 
 	if err != nil {
 		panic(err)
 	}
-	defer resp.Body.Close()
 }
 
 func startupIPFS(dspath string, ctx *context.Context) (*core.IpfsNode, error) {
@@ -1295,7 +1269,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	wg.Wait()
 }
 
-func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string, decrypt bool) {
+func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
 	if spawnClientserver {
 		//fmt.Println("Sleeping for 10 seconds...\n")
 		err := waitForClientserver(120, csBaseUrl)
@@ -1317,7 +1291,7 @@ func processClientCommands(spawnClientserver bool, serverhash string, syncremote
 		// cat something
 	} else if catarg != "" {
 		rdr := catContent(catarg, csBaseUrl, serverhash)
-		catCatContent(rdr, os.Stdout, gpghome, gpgpass, decrypt)
+		catCatContent(rdr, os.Stdout, gpghome, gpgpass)
 	} else if syncremote {
 		rdr := syncRemote(csBaseUrl, serverhash)
 		io.Copy(os.Stdout, rdr)
@@ -1345,7 +1319,7 @@ func main() {
 
 	dspath, home, gpghomeDefault, wg := basicInit()
 
-	var server, verbose, clientserver, spawnClientserver, syncremote, id, decrypt bool
+	var server, verbose, clientserver, spawnClientserver, syncremote, id, noenc bool
 	var serverhash, add, gpghome, gpgpass string
 	var catarg, recipient string
 	var port, timeout int
@@ -1358,8 +1332,8 @@ func main() {
 	flag.StringVar(&dspath, "d", dspath, "Default data path.")
 	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
-	flag.BoolVar(&decrypt, "r", false, "Decrypt a message.")
 	flag.IntVar(&timeout, "t", 60, "Timeout of server if not used")
+	flag.BoolVar(&noenc, "n", false, "Force no encryption if autoenc is set.")
 	flag.Parse()
 
 	server, syncremote, id, add, catarg = parseCommandFromArgs()
@@ -1388,7 +1362,20 @@ func main() {
 		startClientServer(ctx, n, csBaseUrl, serverhash, dspath, time.Duration(timeout)*time.Minute, reloadindex)
 		// run client command
 	} else {
-		processClientCommands(spawnClientserver, serverhash, syncremote, id, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl, decrypt)
+
+		// Check if we are auto encrypting, prefer -e flag
+		filepath := fmt.Sprintf("%s%s.ipbohrc", home, string(os.PathSeparator))
+		ipbohconfig := readIpbohConfig(filepath)
+		if add != "" && ipbohconfig.Autoenc != "" && recipient == "" {
+			recipient = ipbohconfig.Autoenc
+		}
+
+		if add != "" && ipbohconfig.Autoenc != "" && noenc == true {
+			recipient = ""
+		}
+
+		//fmt.Println("Recipient:", recipient)
+		processClientCommands(spawnClientserver, serverhash, syncremote, id, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
 	}
 
 }
