@@ -53,7 +53,7 @@ import (
 
 const HEADER_SIZE = 120
 const MAXTRIES = 10
-const REQUIREDPEERS = 10
+const REQUIREDPEERS = 3
 
 type IpbohConfig struct {
 	Serverhash string
@@ -308,7 +308,7 @@ func decryptOpenpgp(data io.Reader, gpghome string, pass []byte, isarmored bool)
 
 }
 
-func encryptOpenpgp(data io.Reader, recipient string, gpghome string) ([]byte, error) {
+func encryptOpenpgp(data io.Reader, recipient string, gpghome string) (*bytes.Buffer, error) {
 	pubkeyfile, err := os.Open(fmt.Sprintf("%s%spubring.gpg", gpghome, string(os.PathSeparator)))
 	if err != nil {
 		fmt.Println("Failed to open pubring", err)
@@ -338,9 +338,10 @@ func encryptOpenpgp(data io.Reader, recipient string, gpghome string) ([]byte, e
 		return nil, err
 	}
 
-	return buf.Bytes(), nil
+	return buf, nil
 
 }
+
 func saveIndex(index *Index, dspath string) error {
 	fh, err := os.OpenFile(dspath+"/ipboh-index.txt", os.O_RDWR, 0600)
 	if err != nil {
@@ -1080,10 +1081,10 @@ func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string, decry
 
 func addContent(add string, gpghome string, recipient string, baseurl string, serverhash string) {
 
-	var encbytes []byte
+	var encbuf *bytes.Buffer
 	var err error
 	if recipient != "" {
-		encbytes, err = encryptOpenpgp(os.Stdin, recipient, gpghome)
+		encbuf, err = encryptOpenpgp(os.Stdin, recipient, gpghome)
 		if err != nil {
 			panic("Failed to encrypt.")
 		}
@@ -1095,9 +1096,8 @@ func addContent(add string, gpghome string, recipient string, baseurl string, se
 	}
 
 	newcontent := &clientContentReader{name: add, r: os.Stdin}
-	if len(encbytes) != 0 {
-		buf := bytes.NewBuffer(encbytes)
-		newcontent.r = buf
+	if encbuf != nil {
+		newcontent.r = encbuf
 	}
 	resp, err := http.Post(fmt.Sprintf("%s/add?target=%s", baseurl, serverhash), "application/json", newcontent)
 
@@ -1359,7 +1359,7 @@ func main() {
 	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
 	flag.BoolVar(&clientserver, "c", false, "Start client server")
 	flag.BoolVar(&decrypt, "r", false, "Decrypt a message.")
-	flag.IntVar(&timeout, "t", 30, "Timeout of server if not used")
+	flag.IntVar(&timeout, "t", 60, "Timeout of server if not used")
 	flag.Parse()
 
 	server, syncremote, id, add, catarg = parseCommandFromArgs()
