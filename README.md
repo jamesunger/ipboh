@@ -81,9 +81,7 @@ something, just specify the PGP key as such:
 ```
 $ echo "encrypted content" | ipboh -e testkey add enccontent
 ```
-when fetched, it will attempt to decrypt automatically:
+To decrypt, just pass in to gpg:
 ```
-$ ipboh cat enccontent
-Password: 
-encrypted content
+ipboh cat enccontent | gpg -d
 ```
