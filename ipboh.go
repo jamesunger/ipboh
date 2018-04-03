@@ -1034,7 +1034,7 @@ func catContent(catarg string, baseurl string, serverhash string) (rdr io.Reader
 
 }
 
-func catCatContent(resp io.Reader, wtr io.Writer, gpghome, gpgpass string) {
+func catCatContent(resp io.Reader, wtr io.Writer) {
 
 	//defer resp.Close()
 	//bufr := bufio.NewReader(resp)
@@ -1269,7 +1269,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	wg.Wait()
 }
 
-func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, gpgpass, recipient string, verbose bool, csBaseUrl string) {
+func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, recipient string, verbose bool, csBaseUrl string) {
 	if spawnClientserver {
 		//fmt.Println("Sleeping for 10 seconds...\n")
 		err := waitForClientserver(120, csBaseUrl)
@@ -1291,7 +1291,7 @@ func processClientCommands(spawnClientserver bool, serverhash string, syncremote
 		// cat something
 	} else if catarg != "" {
 		rdr := catContent(catarg, csBaseUrl, serverhash)
-		catCatContent(rdr, os.Stdout, gpghome, gpgpass)
+		catCatContent(rdr, os.Stdout)
 	} else if syncremote {
 		rdr := syncRemote(csBaseUrl, serverhash)
 		io.Copy(os.Stdout, rdr)
@@ -1320,14 +1320,13 @@ func main() {
 	dspath, home, gpghomeDefault, wg := basicInit()
 
 	var server, verbose, clientserver, spawnClientserver, syncremote, id, noenc bool
-	var serverhash, add, gpghome, gpgpass string
+	var serverhash, add, gpghome  string
 	var catarg, recipient string
 	var port, timeout int
 
 	flag.BoolVar(&verbose, "v", false, "Verbose")
 	flag.StringVar(&recipient, "e", "", "Encrypt to PGP recipient")
 	flag.StringVar(&gpghome, "g", gpghomeDefault, "GPG homedir.")
-	flag.StringVar(&gpgpass, "gpass", "", "GPG password. This is insecure and only used on Windows where reading from the terminal breaks.")
 	flag.StringVar(&serverhash, "h", "", "Server hash to connect to")
 	flag.StringVar(&dspath, "d", dspath, "Default data path.")
 	flag.IntVar(&port, "p", 9898, "Port used by localhost client server (9898)")
@@ -1375,7 +1374,7 @@ func main() {
 		}
 
 		//fmt.Println("Recipient:", recipient)
-		processClientCommands(spawnClientserver, serverhash, syncremote, id, add, catarg, gpghome, gpgpass, recipient, verbose, csBaseUrl)
+		processClientCommands(spawnClientserver, serverhash, syncremote, id, add, catarg, gpghome, recipient, verbose, csBaseUrl)
 	}
 
 }
