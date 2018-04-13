@@ -71,7 +71,7 @@ type Entry struct {
 	Size      int
 }
 
-func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.WaitGroup, getCurIndex func() *Index) {
+func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, getCurIndex func() *Index) {
 	list, err := corenet.Listen(n, "/pack/index")
 	if err != nil {
 		panic(err)
@@ -120,11 +120,10 @@ func handleIndex(n *core.IpfsNode, ctx context.Context, index *Index, wg *sync.W
 		}()
 	}
 
-	wg.Done()
 
 }
 
-func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mutex, wg *sync.WaitGroup, dspath string, reloadindex chan *Entry, getCurIndex func() *Index) {
+func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mutex, dspath string, reloadindex chan *Entry, getCurIndex func() *Index) {
 	list, err := corenet.Listen(n, "/pack/add")
 	if err != nil {
 		panic(err)
@@ -177,7 +176,6 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 
 	}
 
-	wg.Done()
 
 }
 
@@ -1109,9 +1107,7 @@ func startupIPFS(dspath string, ctx *context.Context) (*core.IpfsNode, error) {
 
 }
 
-func basicInit() (string, string, string, sync.WaitGroup) {
-	var wg sync.WaitGroup
-	wg.Add(2)
+func basicInit() (string, string, string) {
 
 	home := getHomeDir()
 	gpghomeDefault := getGpghomeDir(home)
@@ -1123,7 +1119,7 @@ func basicInit() (string, string, string, sync.WaitGroup) {
 		dspath = fmt.Sprintf("%s/.ipfs", home)
 	}
 
-	return dspath, home, gpghomeDefault, wg
+	return dspath, home, gpghomeDefault
 }
 
 func parseCommandFromArgs() (bool, bool, bool, string, string) {
@@ -1200,7 +1196,7 @@ func phase1Setup(ctx context.Context, server, spawnClientserver, clientserver bo
 	return n, serverhash, port, csBaseUrl, spawnClientserver
 }
 
-func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.WaitGroup, baseurl string, reloadindex chan *Entry) {
+func startServer(ctx context.Context, n *core.IpfsNode, dspath string, baseurl string, reloadindex chan *Entry) {
 	index := loadIndex(n, ctx, dspath)
 	mtx := sync.Mutex{}
 
@@ -1229,8 +1225,8 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 		}
 	}()
 
-	go handleIndex(n, ctx, index, wg, getCurIndex)
-	go handleAdd(n, ctx, index, &mtx, wg, dspath, reloadindex, getCurIndex)
+	go handleIndex(n, ctx, index, getCurIndex)
+	go handleAdd(n, ctx, index, &mtx, dspath, reloadindex, getCurIndex)
 
 	go func() {
 		for {
@@ -1266,7 +1262,7 @@ func startServer(ctx context.Context, n *core.IpfsNode, dspath string, wg *sync.
 	}()
 
 	startClientServer(ctx, n, baseurl, "", dspath, 0, reloadindex)
-	wg.Wait()
+	//wg.Wait()
 }
 
 func processClientCommands(spawnClientserver bool, serverhash string, syncremote bool, id bool, add, catarg, gpghome, recipient string, verbose bool, csBaseUrl string) {
@@ -1317,7 +1313,7 @@ func processClientCommands(spawnClientserver bool, serverhash string, syncremote
 
 func main() {
 
-	dspath, home, gpghomeDefault, wg := basicInit()
+	dspath, home, gpghomeDefault := basicInit()
 
 	var server, verbose, clientserver, spawnClientserver, syncremote, id, noenc bool
 	var serverhash, add, gpghome  string
@@ -1348,7 +1344,7 @@ func main() {
 	// 'phase 2' do the things
 	// startup the server if that is what we are doing
 	if server {
-		startServer(ctx, n, dspath, &wg, csBaseUrl, reloadindex)
+		startServer(ctx, n, dspath, csBaseUrl, reloadindex)
 		// start client server
 	} else if clientserver {
 		go func() {
