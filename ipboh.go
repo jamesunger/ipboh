@@ -131,7 +131,7 @@ func handleAdd(n *core.IpfsNode, ctx context.Context, index *Index, mtx *sync.Mu
 	//fmt.Printf("I am ready to add: %s\n", n.Identity)
 
 	for {
-		fmt.Println("Waiting for add...\n")
+		fmt.Println("Waiting for add...")
 		con, err := list.Accept()
 		if err != nil {
 			fmt.Println(err)
@@ -417,7 +417,7 @@ func loadIndex(n *core.IpfsNode, ctx context.Context, dspath string) *Index {
 			fmt.Println("foundreadlist")
 			index.ReadList, err = parseList(n, ctx, index.Entries[i].Hash)
 			if err != nil {
-				fmt.Println("Failed to read readlist.\n")
+				fmt.Println("Failed to read readlist.")
 			}
 			foundr = true
 		}
@@ -426,7 +426,7 @@ func loadIndex(n *core.IpfsNode, ctx context.Context, dspath string) *Index {
 			fmt.Println("foundwritelist")
 			index.WriteList, err = parseList(n, ctx, index.Entries[i].Hash)
 			if err != nil {
-				fmt.Println("Failed to read writelist.\n")
+				fmt.Println("Failed to read writelist.")
 			}
 			foundw = true
 		}
@@ -680,7 +680,7 @@ func clientHandlerCat(ctx context.Context, w http.ResponseWriter, n *core.IpfsNo
 
 	_, err = io.Copy(w, reader)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error reading or writing entry:", err), 500)
+		http.Error(w, fmt.Sprintln("Error reading or writing entry:", err), 500)
 		return
 	}
 }
@@ -752,7 +752,7 @@ func clientHandlerLs(w http.ResponseWriter, n *core.IpfsNode, targethash string)
 	elbytes, err := json.Marshal(entrylist)
 	//fmt.Println("ls request sending ", string(elbytes))
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error marshaling json:", err), 500)
+		http.Error(w, fmt.Sprintln("Error marshaling json:", err), 500)
 		return
 	}
 	w.Write(elbytes)
@@ -774,7 +774,7 @@ func clientHandlerAdd(w http.ResponseWriter, rdr io.Reader, n *core.IpfsNode, ta
 
 	_, err = io.Copy(con, rdr)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error adding file:", err), 500)
+		http.Error(w, fmt.Sprintln("Error adding file:", err), 500)
 		return
 	}
 }
@@ -980,7 +980,7 @@ func listEntries(baseurl string, serverhash string, verbose bool) {
 	rawbytes, err := ioutil.ReadAll(resp.Body)
 	//fmt.Println("got raw bytes", string(rawbytes))
 	if err != nil {
-		fmt.Println("Error reading response from localhost\n")
+		fmt.Println("Error reading response from localhost")
 		panic(err)
 	}
 	err = json.Unmarshal(rawbytes, entrylist)
